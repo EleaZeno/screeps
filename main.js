@@ -5,6 +5,16 @@ var spawner = require('spawner');
 var pathFinder = require('pathFinder');
 var memoryUtils = require('memoryUtils');
 
+// 上次内存清理的 Tick
+var lastMemoryCleanupTick = 0;
+
+// 上次生成提示更新的 Tick
+var lastSpawningTextUpdateTick = 0;
+
+// 上次路径计算的 Tick
+var lastPathFindingTick = 0;
+var pathFindingInterval = 10; // 路径计算的间隔
+
 // 分组函数：根据目标将 Creep 分组
 function groupCreepsByTarget(creeps) {
   var groups = {};
@@ -21,7 +31,6 @@ function groupCreepsByTarget(creeps) {
 
 module.exports.loop = function () {
   // 内存清理
-  var lastMemoryCleanupTick = 0; // 上次内存清理的 Tick
   if (Game.time - lastMemoryCleanupTick >= 100) {
     memoryUtils.cleanUpMemory();
     lastMemoryCleanupTick = Game.time;
@@ -33,28 +42,25 @@ module.exports.loop = function () {
   var builders = memoryUtils.getBuilders();
 
   // 角色执行逻辑
-  for (var name in harvesters) {
-    roleHarvester.run(harvesters[name]);
-  }
+  harvesters.forEach(function (harvester) {
+    roleHarvester.run(harvester);
+  });
 
-  for (var name in upgraders) {
-    roleUpgrader.run(upgraders[name]);
-  }
+  upgraders.forEach(function (upgrader) {
+    roleUpgrader.run(upgrader);
+  });
 
-  for (var name in builders) {
-    roleBuilder.run(builders[name]);
-  }
+  builders.forEach(function (builder) {
+    roleBuilder.run(builder);
+  });
 
   // 生成新的 creep
-  var lastSpawningTextUpdateTick = 0; // 上次生成提示更新的 Tick
   if (Game.time - lastSpawningTextUpdateTick >= 5) {
     spawner.spawnCreeps();
     lastSpawningTextUpdateTick = Game.time;
   }
 
   // 路径计算函数
-  var lastPathFindingTick = 0; // 上次路径计算的 Tick
-  var pathFindingInterval = 10; // 路径计算的间隔
   if (Game.time - lastPathFindingTick >= pathFindingInterval) {
     var allCreeps = Object.values(Game.creeps);
     var groupedCreeps = groupCreepsByTarget(allCreeps);
@@ -64,13 +70,12 @@ module.exports.loop = function () {
       var targetObject = Game.getObjectById(target);
 
       if (targetObject) {
-        for (var i = 0; i < targetCreeps.length; i++) {
-          var creep = targetCreeps[i];
+        targetCreeps.forEach(function (creep) {
           var currentPos = creep.pos;
           var targetPos = targetObject.pos;
           var path = currentPos.findPathTo(targetPos);
           creep.memory.path = path;
-        }
+        });
       }
     }
 
