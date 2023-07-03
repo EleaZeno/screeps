@@ -1,11 +1,3 @@
-/*
- * Module code goes here. Use 'module.exports' to export things:
- * module.exports.thing = 'a thing';
- *
- * You can import it from another modules like this:
- * var mod = require('spawner');
- * mod.thing == 'a thing'; // true
- */
 var lastSpawnTick = 0;
 var lastSpawningTextUpdateTick = 0;
 var spawnCheckInterval = 5;
@@ -22,11 +14,11 @@ module.exports.spawnCreeps = function () {
 
     // 获取房间能量信息
     var roomEnergy = Game.spawns['Spawn1'].room.energyAvailable;
-    var extensions = Game.spawns['Spawn1'].room.find(FIND_STRUCTURES, {
+    var extensionsEnergy = Game.spawns['Spawn1'].room.find(FIND_STRUCTURES, {
         filter: { structureType: STRUCTURE_EXTENSION }
-    });
-    var extensionsEnergy = _.sum(extensions, 'store.energy');
+    }).reduce((total, ext) => total + ext.store.energy, 0);
     var totalEnergy = Game.spawns['Spawn1'].store.energy + extensionsEnergy;
+
     // 设置目标数量和角色的身体部件
     var harvesterTargetCount = totalEnergy < 400 ? 10 : 5;
     var upgraderTargetCount = 10;
@@ -35,10 +27,12 @@ module.exports.spawnCreeps = function () {
     var harvesterBody = [WORK, CARRY, MOVE];
     var upgraderBody = [WORK, CARRY, MOVE];
     var builderBody = [WORK, CARRY, MOVE];
+
     // 获取当前已存在的 creep 数量
     var harvesters = _.filter(Game.creeps, (creep) => creep.memory.role == 'harvester');
     var upgraders = _.filter(Game.creeps, (creep) => creep.memory.role == 'upgrader');
     var builders = _.filter(Game.creeps, (creep) => creep.memory.role == 'builder');
+
     // 根据目标数量生成新的 creep
     if (harvesters.length < harvesterTargetCount) {
         spawnCreep('harvester', harvesterBody);
@@ -55,6 +49,7 @@ function spawnCreep(role, body) {
     var spawnResult = Game.spawns['Spawn1'].spawnCreep(body, newName, {
         memory: { role: role }
     });
+
     // 根据生成结果进行日志输出
     if (spawnResult == OK) {
         console.log('Spawning new ' + role + ': ' + newName);
@@ -64,4 +59,3 @@ function spawnCreep(role, body) {
         console.log('Failed to spawn ' + role + '. Error: ' + spawnResult);
     }
 }
-
