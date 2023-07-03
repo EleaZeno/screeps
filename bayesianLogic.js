@@ -6,38 +6,34 @@
  * var mod = require('bayesianLogic');
  * mod.thing == 'a thing'; // true
  */
-
 var bayesianLogic = {
   selectEnergySource: function(creep) {
+    var bayesianStatistics = require('bayesianStatistics');
     var energySources = creep.room.find(FIND_SOURCES);
+
     // 使用贝叶斯逻辑选择最佳能量源
     var bestEnergySource = null;
     var bestEnergySourceScore = -Infinity;
 
     for (var i = 0; i < energySources.length; i++) {
-    var energySource = energySources[i];
+      var energySource = energySources[i];
 
-    // 计算能量源的分数，根据你的需求进行定义
-    var score = calculateEnergySourceScore(creep, energySource);
+      // 计算能量源的分数，根据你的需求进行定义
+      var score = calculateEnergySourceScore(creep, energySource);
 
-    // 更新最佳能量源
-    if (score > bestEnergySourceScore) {
-    bestEnergySource = energySource;
-    bestEnergySourceScore = score;
-  }
-}
-
-    // 存储评估分数到全局内存对象
-    if (!Memory.bayesianScores) {
-    Memory.bayesianScores = {};
+      // 更新最佳能量源
+      if (score > bestEnergySourceScore) {
+        bestEnergySource = energySource;
+        bestEnergySourceScore = score;
+      }
     }
-    if (!Memory.bayesianScores.energySources) {
-    Memory.bayesianScores.energySources = {};
+
+    // 更新能量源的贝叶斯分数
+    if (bestEnergySource) {
+      bayesianStatistics.updateEnergySourceScore(bestEnergySource.id, bestEnergySourceScore, creep.memory.role);
     }
-    Memory.bayesianScores.energySources[bestEnergySource.id] = bestEnergySourceScore;
 
     return bestEnergySource;
-
   }
 };
 
@@ -47,15 +43,30 @@ function calculateEnergySourceScore(creep, energySource) {
   }
 
   // 根据你的需求计算能量源的分数
-  // 可以考虑距离、能量剩余量等因素
+  // 考虑距离、能量剩余量、Creep 数目和障碍物数量等因素
 
-  // 示例：根据距离计算分数，距离越近，分数越高
+  var distanceWeight = 0.6; // 距离权重
+  var energyWeight = 0.3; // 能量剩余量权重
+  var creepCountWeight = 0.1; // Creep 数目权重
+
   var distance = creep.pos.getRangeTo(energySource);
-  var score = -distance; // 取负数以便最远的能量源分数最低
+  var energyAvailable = energySource.energy;
+  var creepCount = energySource.pos.findInRange(FIND_MY_CREEPS, 1).length;
+  var obstacleCount = energySource.pos.findInRange(FIND_STRUCTURES, 1, {
+    filter: (structure) => {
+      return structure.structureType === STRUCTURE_ROAD || structure.structureType === STRUCTURE_CONTAINER;
+    }
+  }).length;
+
+  var score = distanceWeight * (10 - distance) +
+              energyWeight * energyAvailable -
+              creepCountWeight * creepCount -
+              obstacleCount; // 加权计算分数
 
   return score;
 }
 
-
 module.exports = bayesianLogic;
+
+
 

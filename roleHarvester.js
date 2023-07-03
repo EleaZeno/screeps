@@ -7,15 +7,17 @@
  * mod.thing == 'a thing'; // true
  */
 
+var bayesianLogic = require('bayesianLogic');
+
 module.exports = {
   run: function (creep) {
     if (creep.store.getFreeCapacity() > 0) {
       // 背包未满，进行采矿
-      const source = creep.pos.findClosestByPath(FIND_SOURCES_ACTIVE);
-      if (source) {
-        const harvestResult = creep.harvest(source);
+      var bestEnergySource = bayesianLogic.selectEnergySource(creep);
+      if (bestEnergySource) {
+        const harvestResult = creep.harvest(bestEnergySource);
         if (harvestResult === ERR_NOT_IN_RANGE) {
-          creep.moveTo(source, { visualizePathStyle: { stroke: '#ffaa00' } });
+          creep.moveTo(bestEnergySource, { visualizePathStyle: { stroke: '#ffaa00' } });
         } else if (harvestResult !== OK) {
           console.log(`Failed to harvest energy: ${harvestResult}`);
         }
@@ -43,3 +45,4 @@ module.exports = {
     }
   },
 };
+

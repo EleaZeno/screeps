@@ -7,6 +7,8 @@
  * mod.thing == 'a thing'; // true
  */
 
+var bayesianLogic = require('bayesianLogic');
+
 module.exports = {
   run: function (creep) {
     if (creep.memory.upgrading && creep.store[RESOURCE_ENERGY] === 0) {
@@ -29,11 +31,11 @@ module.exports = {
         }
       }
     } else {
-      const sources = creep.room.find(FIND_SOURCES_ACTIVE);
-      if (sources.length > 0) {
-        const harvestResult = creep.harvest(sources[0]);
+      var bestEnergySource = bayesianLogic.selectEnergySource(creep);
+      if (bestEnergySource) {
+        const harvestResult = creep.harvest(bestEnergySource);
         if (harvestResult === ERR_NOT_IN_RANGE) {
-          creep.moveTo(sources[0], { visualizePathStyle: { stroke: '#ffaa00' } });
+          creep.moveTo(bestEnergySource, { visualizePathStyle: { stroke: '#ffaa00' } });
         } else if (harvestResult !== OK) {
           console.log(`Failed to harvest energy: ${harvestResult}`);
         }
@@ -41,7 +43,6 @@ module.exports = {
     }
   },
 };
-
 
 
 
