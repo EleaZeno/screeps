@@ -3,7 +3,7 @@
  * module.exports.thing = 'a thing';
  *
  * You can import it from another modules like this:
- * var mod = require('role.harvester');
+ * var mod = require('roleHarvester');
  * mod.thing == 'a thing'; // true
  */
 

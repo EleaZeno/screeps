@@ -1,3 +1,11 @@
+/*
+ * Module code goes here. Use 'module.exports' to export things:
+ * module.exports.thing = 'a thing';
+ *
+ * You can import it from another modules like this:
+ * var mod = require('memoryUtils');
+ * mod.thing == 'a thing'; // true
+ */
 var pathCache = new Map(); // 路径缓存对象
 
 module.exports.cleanUpMemory = function () {
