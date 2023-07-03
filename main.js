@@ -1,3 +1,4 @@
+// main.js
 var roleHarvester = require('roleHarvester');
 var roleUpgrader = require('roleUpgrader');
 var roleBuilder = require('roleBuilder');
@@ -43,7 +44,15 @@ module.exports.loop = function () {
   var pathFindingInterval = 10; // 路径计算的间隔
   if (Game.time - lastPathFindingTick >= pathFindingInterval) {
     var allCreeps = Object.values(Game.creeps);
-    pathFinder.calculatePaths(allCreeps, lastPathFindingTick, pathFindingInterval);
+    var cachedPaths = memoryUtils.getCachedPaths(Game.time);
+
+    if (cachedPaths) {
+      pathFinder.applyCachedPaths(allCreeps, cachedPaths);
+    } else {
+      var paths = pathFinder.calculatePaths(allCreeps, lastPathFindingTick, pathFindingInterval);
+      memoryUtils.updatePathCache(Game.time, paths);
+    }
+
     lastPathFindingTick = Game.time;
   }
 };
