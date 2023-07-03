@@ -8,27 +8,38 @@
  */
 
 module.exports = {
-    run: function(creep) {
-        if(creep.store.getFreeCapacity() > 0) { // 背包未满 采矿
-            var sources = creep.room.find(FIND_SOURCES);
-            if(creep.harvest(sources[0]) == ERR_NOT_IN_RANGE) {
-                creep.moveTo(sources[0], {visualizePathStyle: {stroke: '#ffaa00'}});
-            }
+  run: function (creep) {
+    if (creep.store.getFreeCapacity() > 0) {
+      // 背包未满，进行采矿
+      const source = creep.pos.findClosestByPath(FIND_SOURCES_ACTIVE);
+      if (source) {
+        const harvestResult = creep.harvest(source);
+        if (harvestResult === ERR_NOT_IN_RANGE) {
+          creep.moveTo(source, { visualizePathStyle: { stroke: '#ffaa00' } });
+        } else if (harvestResult !== OK) {
+          console.log(`Failed to harvest energy: ${harvestResult}`);
         }
-        else {
-            var targets = creep.room.find(FIND_STRUCTURES, {
-                filter: (structure) => {
-                    return (structure.structureType == STRUCTURE_EXTENSION || 
-                            structure.structureType == STRUCTURE_SPAWN ||
-                            structure.structureType == STRUCTURE_TOWER) &&
-                        structure.store.getFreeCapacity(RESOURCE_ENERGY) > 0;
-                }
-            });
-            if(targets.length > 0) { // 需要维护的建筑数目 > 0
-                if(creep.transfer(targets[0], RESOURCE_ENERGY) == ERR_NOT_IN_RANGE) {
-                    creep.moveTo(targets[0], {visualizePathStyle: {stroke: '#ffffff'}});
-                }
-            }
+      }
+    } else {
+      // 背包已满，进行能量传输
+      const targets = creep.room.find(FIND_MY_STRUCTURES, {
+        filter: (structure) => {
+          return (
+            (structure.structureType === STRUCTURE_EXTENSION ||
+              structure.structureType === STRUCTURE_SPAWN ||
+              structure.structureType === STRUCTURE_TOWER) &&
+            structure.store.getFreeCapacity(RESOURCE_ENERGY) > 0
+          );
+        },
+      });
+      if (targets.length > 0) {
+        const transferResult = creep.transfer(targets[0], RESOURCE_ENERGY);
+        if (transferResult === ERR_NOT_IN_RANGE) {
+          creep.moveTo(targets[0], { visualizePathStyle: { stroke: '#ffffff' } });
+        } else if (transferResult !== OK) {
+          console.log(`Failed to transfer energy: ${transferResult}`);
         }
+      }
     }
+  },
 };
