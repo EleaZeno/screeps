@@ -5,6 +5,8 @@ var spawner = require('spawner');
 var pathFinder = require('pathFinder');
 var memoryUtils = require('memoryUtils');
 var bayesianLogic = require('bayesianLogic');
+var statisticsModule = require('statisticsModule');
+
 
 // 上次内存清理的 Tick
 var lastMemoryCleanupTick = 0;
@@ -82,6 +84,14 @@ module.exports.loop = function () {
 
     lastPathFindingTick = Game.time;
   }
+ 
+
+  // 调用统计模块的updateStatistics方法
+  var energyGainedThisTick = statisticsModule.updateStatistics();
+
+  // 输出能量获取量
+  console.log('能量获取量:', energyGainedThisTick);
+  
   // 执行贝叶斯模型的决策
   for (var name in Game.creeps) {
   var creep = Game.creeps[name];
