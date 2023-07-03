@@ -44,3 +44,4 @@ module.exports.loop = function () {
     // 路径计算函数
     pathFinder.calculatePaths(allCreeps, lastPathFindingTick, pathFindingInterval);
 };
+    //测试
