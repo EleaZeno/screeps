@@ -1,10 +1,23 @@
-// main.js
 var roleHarvester = require('roleHarvester');
 var roleUpgrader = require('roleUpgrader');
 var roleBuilder = require('roleBuilder');
 var spawner = require('spawner');
 var pathFinder = require('pathFinder');
 var memoryUtils = require('memoryUtils');
+
+// 分组函数：根据目标将 Creep 分组
+function groupCreepsByTarget(creeps) {
+  var groups = {};
+  for (var name in creeps) {
+    var creep = creeps[name];
+    var target = creep.memory.target;
+    if (!groups[target]) {
+      groups[target] = [];
+    }
+    groups[target].push(creep);
+  }
+  return groups;
+}
 
 module.exports.loop = function () {
   // 内存清理
@@ -44,13 +57,21 @@ module.exports.loop = function () {
   var pathFindingInterval = 10; // 路径计算的间隔
   if (Game.time - lastPathFindingTick >= pathFindingInterval) {
     var allCreeps = Object.values(Game.creeps);
-    var cachedPaths = memoryUtils.getCachedPaths(Game.time);
+    var groupedCreeps = groupCreepsByTarget(allCreeps);
 
-    if (cachedPaths) {
-      pathFinder.applyCachedPaths(allCreeps, cachedPaths);
-    } else {
-      var paths = pathFinder.calculatePaths(allCreeps, lastPathFindingTick, pathFindingInterval);
-      memoryUtils.updatePathCache(Game.time, paths);
+    for (var target in groupedCreeps) {
+      var targetCreeps = groupedCreeps[target];
+      var targetObject = Game.getObjectById(target);
+
+      if (targetObject) {
+        for (var i = 0; i < targetCreeps.length; i++) {
+          var creep = targetCreeps[i];
+          var currentPos = creep.pos;
+          var targetPos = targetObject.pos;
+          var path = currentPos.findPathTo(targetPos);
+          creep.memory.path = path;
+        }
+      }
     }
 
     lastPathFindingTick = Game.time;

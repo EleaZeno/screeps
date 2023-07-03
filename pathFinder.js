@@ -6,22 +6,42 @@
  * var mod = require('pathFinder');
  * mod.thing == 'a thing'; // true
  */
+var memoryUtils = require('memoryUtils');
 
-module.exports.calculatePaths = function (creeps, lastPathFindingTick, pathFindingInterval) {
-    if (Game.time - lastPathFindingTick >= pathFindingInterval) {
-        for (var name in creeps) {
-            var creep = creeps[name];
-            var target = creep.memory.target; // 角色的移动目标
-
-            // 检查上一次的目标位置...
-
-            // 如果目标位置发生变化或路径为空，计算新的移动路径...
-            if (creep.memory.target != target || !creep.memory.path) {
-                var path = creep.pos.findPathTo(target);
-                creep.memory.path = path;
-                creep.memory.target = target;
-            }
-        }
-        lastPathFindingTick = Game.time;
+function groupCreepsByTarget(creeps) {
+  var groups = {};
+  for (var name in creeps) {
+    var creep = creeps[name];
+    var target = creep.memory.target;
+    if (!groups[target]) {
+      groups[target] = [];
     }
+    groups[target].push(creep);
+  }
+  return groups;
+}
+
+var lastPathFindingTick = 0; // 上次路径计算的 Tick
+
+module.exports.calculatePaths = function (creeps, pathFindingInterval) {
+  if (Game.time - lastPathFindingTick >= pathFindingInterval) {
+    var groupedCreeps = groupCreepsByTarget(creeps);
+
+    for (var target in groupedCreeps) {
+      var targetCreeps = groupedCreeps[target];
+      var targetObject = Game.getObjectById(target);
+
+      if (targetObject) {
+        for (var i = 0; i < targetCreeps.length; i++) {
+          var creep = targetCreeps[i];
+          var currentPos = creep.pos;
+          var targetPos = targetObject.pos;
+          var path = currentPos.findPathTo(targetPos);
+          creep.memory.path = path;
+        }
+      }
+    }
+
+    lastPathFindingTick = Game.time;
+  }
 };

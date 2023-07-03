@@ -7,7 +7,7 @@
  * mod.thing == 'a thing'; // true
  */
 
-var pathCache = {}; // 路径缓存对象
+var pathCache = new Map(); // 路径缓存对象
 
 module.exports = {
   cleanUpMemory: function () {
@@ -23,34 +23,35 @@ module.exports = {
       Memory.lastMemoryCleanupTick = Game.time;
     }
   },
-  
+
   getHarvesters: function () {
-    var allCreeps = Object.values(Game.creeps);
-    return allCreeps.filter((creep) => creep.memory.role === 'harvester');
+    var creepNames = Object.keys(Game.creeps);
+    return creepNames.map((name) => Game.creeps[name]).filter((creep) => creep.memory.role === 'harvester');
   },
-  
+
   getUpgraders: function () {
-    var allCreeps = Object.values(Game.creeps);
-    return allCreeps.filter((creep) => creep.memory.role === 'upgrader');
+    var creepNames = Object.keys(Game.creeps);
+    return creepNames.map((name) => Game.creeps[name]).filter((creep) => creep.memory.role === 'upgrader');
   },
-  
+
   getBuilders: function () {
-    var allCreeps = Object.values(Game.creeps);
-    return allCreeps.filter((creep) => creep.memory.role === 'builder');
+    var creepNames = Object.keys(Game.creeps);
+    return creepNames.map((name) => Game.creeps[name]).filter((creep) => creep.memory.role === 'builder');
   },
 
   updatePathCache: function (tick, paths) {
     // 更新路径缓存
-    pathCache[tick] = paths;
+    pathCache.set(tick, paths);
   },
 
   getCachedPaths: function (tick) {
     // 获取缓存的路径
-    return pathCache[tick];
+    return pathCache.get(tick);
   },
 
   clearPathCache: function () {
     // 清空路径缓存
-    pathCache = {};
+    pathCache.clear();
   }
 };
+
