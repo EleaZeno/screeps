@@ -4,6 +4,7 @@ var roleBuilder = require('roleBuilder');
 var spawner = require('spawner');
 var pathFinder = require('pathFinder');
 var memoryUtils = require('memoryUtils');
+var bayesianLogic = require('bayesianLogic');
 
 // 上次内存清理的 Tick
 var lastMemoryCleanupTick = 0;
@@ -81,4 +82,13 @@ module.exports.loop = function () {
 
     lastPathFindingTick = Game.time;
   }
-};
+  // 执行贝叶斯模型的决策
+  for (var name in Game.creeps) {
+  var creep = Game.creeps[name];
+  if (creep.memory.role == 'harvester') {
+    var energySource = bayesianLogic.selectEnergySource(creep);
+    creep.memory.target = energySource ? energySource.id : null; // 设置采集者的目标能量源
+  }
+}
+
+}
