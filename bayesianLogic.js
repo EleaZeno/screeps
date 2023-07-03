@@ -45,28 +45,33 @@ function calculateEnergySourceScore(creep, energySource) {
   // 根据你的需求计算能量源的分数
   // 考虑距离、能量剩余量、Creep 数目和障碍物数量等因素
 
-  var distanceWeight = 0.6; // 距离权重
+  var distanceWeight = 0.5; // 距离权重
   var energyWeight = 0.3; // 能量剩余量权重
   var creepCountWeight = 0.1; // Creep 数目权重
+  var assignedCreepCountWeight = 0.1; // 已分配 Creep 数目权重
 
   var distance = creep.pos.getRangeTo(energySource);
   var energyAvailable = energySource.energy;
   var creepCount = energySource.pos.findInRange(FIND_MY_CREEPS, 1).length;
+  var assignedCreepCount = _.filter(Game.creeps, (c) => c.memory.energySourceId === energySource.id).length;
   var obstacleCount = energySource.pos.findInRange(FIND_STRUCTURES, 1, {
     filter: (structure) => {
       return structure.structureType === STRUCTURE_ROAD || structure.structureType === STRUCTURE_CONTAINER;
     }
   }).length;
 
+  // 根据 Creep 数目调整分数
+  var creepCountFactor = 1 - (creepCount * creepCountWeight);
+  // 根据已分配 Creep 数目调整分数
+  var assignedCreepCountFactor = 1 - (assignedCreepCount * assignedCreepCountWeight);
+
   var score = distanceWeight * (10 - distance) +
               energyWeight * energyAvailable -
-              creepCountWeight * creepCount -
-              obstacleCount; // 加权计算分数
+              obstacleCount +
+              creepCountFactor +
+              assignedCreepCountFactor; // 加权计算分数
 
   return score;
 }
 
 module.exports = bayesianLogic;
-
-
-

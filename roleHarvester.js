@@ -9,6 +9,8 @@
 
 var bayesianLogic = require('bayesianLogic');
 
+
+
 module.exports = {
   run: function (creep) {
     if (creep.store.getFreeCapacity() > 0) {

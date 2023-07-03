@@ -1,12 +1,3 @@
-/*
- * Module code goes here. Use 'module.exports' to export things:
- * module.exports.thing = 'a thing';
- *
- * You can import it from another modules like this:
- * var mod = require('bayesianStatistics');
- * mod.thing == 'a thing'; // true
- */
-
 var bayesianStatistics = {
   updateEnergySourceScore: function(energySourceId, score, role) {
     if (!Memory.energySources) {
@@ -23,7 +14,13 @@ var bayesianStatistics = {
 
     // 更新能量源的判断值
     var energySourceData = Memory.energySources[energySourceId];
-    var roleScore = energySourceData.scores[role] || 0;
+    if (!energySourceData.scores) {
+      energySourceData.scores = {};
+    }
+    var roleScore = 0;
+    if (energySourceData.scores.hasOwnProperty(role)) {
+      roleScore = energySourceData.scores[role];
+    }
 
     // 使用简单的加权平均进行贝叶斯修正
     energySourceData.totalScore -= roleScore;
@@ -36,6 +33,3 @@ var bayesianStatistics = {
 };
 
 module.exports = bayesianStatistics;
-
-
-
