@@ -51,3 +51,11 @@ module.exports.clearPathCache = function () {
   // 清空路径缓存
   pathCache.clear();
 };
+
+// 定期清除无效的内存项目
+module.exports.periodicMemoryCleanup = function (interval) {
+  if (Game.time % interval === 0) {
+    this.cleanUpMemory();
+    this.clearPathCache();
+  }
+};

@@ -84,21 +84,22 @@ module.exports.loop = function () {
 
     lastPathFindingTick = Game.time;
   }
- 
 
   // 调用统计模块的updateStatistics方法
   var energyGainedThisTick = statisticsModule.updateStatistics();
 
+  // 在主循环中调用定期清除函数
+  memoryUtils.periodicMemoryCleanup(10);
+
   // 输出能量获取量
   console.log('能量获取量:', energyGainedThisTick);
-  
+
   // 执行贝叶斯模型的决策
   for (var name in Game.creeps) {
-  var creep = Game.creeps[name];
-  if (creep.memory.role == 'harvester') {
-    var energySource = bayesianLogic.selectEnergySource(creep);
-    creep.memory.target = energySource ? energySource.id : null; // 设置采集者的目标能量源
+    var creep = Game.creeps[name];
+    if (creep.memory.role == 'harvester') {
+      var energySource = bayesianLogic.selectEnergySource(creep);
+      creep.memory.target = energySource ? energySource.id : null; // 设置采集者的目标能量源
+    }
   }
-}
-
 }
