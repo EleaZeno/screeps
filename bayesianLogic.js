@@ -6,29 +6,24 @@
  * var mod = require('bayesianLogic');
  * mod.thing == 'a thing'; // true
  */
+var bayesianStatistics = require('bayesianStatistics');
+
 var bayesianLogic = {
   selectEnergySource: function(creep) {
-    var bayesianStatistics = require('bayesianStatistics');
     var energySources = creep.room.find(FIND_SOURCES);
 
-    // 使用贝叶斯逻辑选择最佳能量源
     var bestEnergySource = null;
     var bestEnergySourceScore = -Infinity;
 
-    for (var i = 0; i < energySources.length; i++) {
-      var energySource = energySources[i];
-
-      // 计算能量源的分数，根据你的需求进行定义
+    energySources.map(function(energySource) {
       var score = calculateEnergySourceScore(creep, energySource);
 
-      // 更新最佳能量源
       if (score > bestEnergySourceScore) {
         bestEnergySource = energySource;
         bestEnergySourceScore = score;
       }
-    }
+    });
 
-    // 更新能量源的贝叶斯分数
     if (bestEnergySource) {
       bayesianStatistics.updateEnergySourceScore(bestEnergySource.id, bestEnergySourceScore, creep.memory.role);
     }
