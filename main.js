@@ -16,7 +16,7 @@ class GameManager {
     this.lastPathFindingTick = 0;
     this.pathFindingInterval = 10;
   }
-
+  
   run() {
     // 内存清理
     if (Game.time - this.lastMemoryCleanupTick >= 100) {
@@ -29,18 +29,10 @@ class GameManager {
     var upgraders = memoryUtils.getUpgraders();
     var builders = memoryUtils.getBuilders();
 
-    // 角色执行逻辑
-    harvesters.forEach(function (harvester) {
-      roleHarvester.run(harvester);
-    });
-
-    upgraders.forEach(function (upgrader) {
-      roleUpgrader.run(upgrader);
-    });
-
-    builders.forEach(function (builder) {
-      roleBuilder.run(builder);
-    });
+    // 执行角色逻辑
+    this.runRoles(harvesters);
+    this.runRoles(upgraders);
+    this.runRoles(builders);
 
     // 生成新的 creep
     if (Game.time - this.lastSpawningTextUpdateTick >= 5) {
@@ -72,6 +64,24 @@ class GameManager {
       }
     }
   }
+
+runRoles(roles) {
+  roles.forEach(function (role) {
+    const RoleClass = roleClasses[role.memory.role];
+    if (RoleClass) {
+      // 根据角色类型调用相应的模块
+      if (role.memory.role === 'builder') {
+        roleBuilder.run(role);
+      } else if (role.memory.role === 'harvester') {
+        roleHarvester.run(role);
+      } else if (role.memory.role === 'upgrader') {
+        roleUpgrader.run(role);
+      } else {
+        new RoleClass(role).run();
+      }
+    }
+  });
+}
 
   calculatePaths() {
     var allCreeps = Object.values(Game.creeps);
@@ -106,6 +116,59 @@ class GameManager {
   }
 }
 
+// 角色基类
+class Role {
+  constructor(creep) {
+    this.creep = creep;
+  }
+
+  run() {
+    // 基类中的默认行为
+    console.log(`Role ${this.creep.memory.role} is running.`);
+  }
+}
+
+// 采集者角色类
+class Harvester extends Role {
+  constructor(creep) {
+    super(creep);
+  }
+
+  run() {
+    // 重写基类中的 run 方法
+    console.log(`Harvester ${this.creep.name} is harvesting.`);
+  }
+}
+
+// 升级者角色类
+class Upgrader extends Role {
+  constructor(creep) {
+    super(creep);
+  }
+
+  run() {
+    // 重写基类中的 run 方法
+    console.log(`Upgrader ${this.creep.name} is upgrading.`);
+  }
+}
+
+// 建造者角色类
+class Builder extends Role {
+  constructor(creep) {
+    super(creep);
+  }
+
+  run() {
+    // 重写基类中的 run 方法
+    console.log(`Builder ${this.creep.name} is building.`);
+  }
+}
+// 角色类映射
+const roleClasses = {
+  harvester: Harvester,
+  upgrader: Upgrader,
+  builder: Builder,
+};
 // 创建游戏管理器实例并运行主循环
 var gameManager = new GameManager();
 module.exports.loop = function () {
