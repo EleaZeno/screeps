@@ -1,4 +1,12 @@
-var bayesianStatistics = {
+/*
+ * Module code goes here. Use 'module.exports' to export things:
+ * module.exports.thing = 'a thing';
+ *
+ * You can import it from another modules like this:
+ * var mod = require('bayesianStatistic');
+ * mod.thing == 'a thing'; // true
+ */
+ var bayesianStatistics = {
   updateEnergySourceScore: function(energySourceId, score, role) {
     if (!Memory.energySources) {
       Memory.energySources = {};
