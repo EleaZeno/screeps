@@ -42,6 +42,24 @@ console.log(`  重CARRY: 采矿吞吐=${hcHarvest.toFixed(1)} 搬运吞吐=${hcH
 ok(hwHarvest > hcHarvest, '重WORK采矿吞吐 > 重CARRY采矿吞吐（重WORK该去采）');
 ok(hcHaul > hwHaul, '重CARRY搬运吞吐 > 重WORK搬运吞吐（重CARRY该去搬）');
 
+console.log('\n=== 能量经济流：理解需几个 Hauler（防失业）===');
+const wm3 = require('./worldmodel');
+function mkRoom2(harvCreeps, haulerCreeps, srcDist) {
+  const sources = [{ pos: { x: 10, y: 25 } }, { pos: { x: 40, y: 25 } }];
+  const spawn = { pos: { x: 25, y: 25 } };
+  const creeps = [];
+  for (let i = 0; i < harvCreeps; i++) creeps.push({ body: [WORK, WORK, WORK, WORK, WORK, CARRY, MOVE].map(t => ({ type: t })), memory: { taskType: 'harvest' } });
+  for (let i = 0; i < haulerCreeps; i++) creeps.push({ body: [CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, MOVE, MOVE, MOVE].map(t => ({ type: t })), memory: { taskType: 'haul' } });
+  return { find(t) { if (t === FIND_SOURCES) return sources; if (t === FIND_MY_SPAWNS) return [spawn]; if (t === FIND_MY_CREEPS) return creeps; return []; } };
+}
+global.FIND_SOURCES = 1; global.FIND_MY_SPAWNS = 3; global.FIND_MY_CREEPS = 10;
+const flowBalanced = wm3.economyFlow(mkRoom2(2, 3, 15));
+console.log('  2采集+3Hauler:', JSON.stringify(flowBalanced));
+const flowGlut = wm3.economyFlow(mkRoom2(2, 8, 15));
+console.log('  2采集+8Hauler:', JSON.stringify(flowGlut));
+ok(flowGlut.balance > 0, `8 Hauler 时检测到过剩 balance>0 (实际${flowGlut.balance})`);
+ok(flowGlut.haulNeed < 8, `理解只需 ${flowGlut.haulNeed} 个 Hauler，8个是浪费`);
+
 console.log('\n========================================');
 console.log(fail === 0 ? `🎉 ALL ${pass} CHECKS PASSED` : `❌ ${fail} FAILED / ${pass} passed`);
 process.exit(fail === 0 ? 0 : 1);

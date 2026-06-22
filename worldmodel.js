@@ -128,4 +128,33 @@ module.exports = {
         return p.work || p.carry || 1;
     }
   },
+
+  /**
+   * ⭐ 能量经济流模型：理解整个殖民地的能量供求平衡。
+   * 让大脑明白"需要几个 Hauler"—— 算：采集产出总速率 ÷ 单个 Hauler 运力。
+   * 产出 > 运力 → 缺 Hauler；运力 > 产出 → Hauler 过剩(失业)。
+   */
+  economyFlow(room) {
+    const sources = room.find(FIND_SOURCES);
+    const myCreeps = room.find(FIND_MY_CREEPS);
+    let harvestCapacity = 0;
+    for (const c of myCreeps) {
+      const p = this.parts(c);
+      if (c.memory && c.memory.taskType === 'harvest') {
+        harvestCapacity += Math.min(p.work * HARVEST_POWER, SOURCE_REGEN_RATE);
+      }
+    }
+    const harvestRate = Math.min(harvestCapacity, sources.length * SOURCE_REGEN_RATE);
+    const spawn = room.find(FIND_MY_SPAWNS)[0];
+    let avgDist = 10;
+    if (spawn && sources.length) {
+      let sum = 0;
+      for (const s of sources) sum += Math.max(Math.abs(s.pos.x - spawn.pos.x), Math.abs(s.pos.y - spawn.pos.y));
+      avgDist = sum / sources.length;
+    }
+    const haulerThroughput = (6 * CARRY_CAPACITY) / Math.max(1, avgDist * 2);
+    const haulNeed = Math.max(1, Math.ceil(harvestRate / Math.max(0.1, haulerThroughput)));
+    const haulHave = myCreeps.filter((c) => { const p = this.parts(c); return p.carry > 0 && p.work === 0; }).length;
+    return { harvestRate, haulNeed, haulHave, balance: haulHave - haulNeed, avgDist: Math.round(avgDist) };
+  },
 };

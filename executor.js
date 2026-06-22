@@ -105,8 +105,23 @@ module.exports = {
 
   /** 无任务兜底：去 controller 附近待命（不瞎跑），有能量就升级 */
   _idle(creep, utils) {
+    const wm = require('worldmodel');
+    const p = wm.parts(creep);
     const ctrl = creep.room.controller;
-    if (creep.store[RESOURCE_ENERGY] > 0 && ctrl) {
+    const hasEnergy = creep.store[RESOURCE_ENERGY] > 0;
+    if (p.work === 0) {
+      // 纯CARRY(Hauler)不能升级/采矿：有能量→送需求点/container；空载→取货待命。
+      if (hasEnergy) {
+        const drop = utils.findEnergyDropOff ? utils.findEnergyDropOff(creep) : null;
+        if (drop) { if (utils.work(creep, 'transfer', drop, RESOURCE_ENERGY) === ERR_NOT_IN_RANGE) utils.moveTo(creep, drop, '#ffffff'); return; }
+        const store = creep.pos.findClosestByPath(FIND_STRUCTURES, { filter: (s) => (s.structureType === STRUCTURE_CONTAINER || s.structureType === STRUCTURE_STORAGE) && s.store.getFreeCapacity(RESOURCE_ENERGY) > 0 });
+        if (store) { if (utils.work(creep, 'transfer', store, RESOURCE_ENERGY) === ERR_NOT_IN_RANGE) utils.moveTo(creep, store, '#ffffff'); return; }
+        return;
+      }
+      utils.gatherEnergy(creep);
+      return;
+    }
+    if (hasEnergy && ctrl) {
       if (utils.work(creep, 'upgradeController', ctrl) === ERR_NOT_IN_RANGE) utils.moveTo(creep, ctrl, '#66ccff');
     } else {
       utils.gatherEnergy(creep);
