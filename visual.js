@@ -16,11 +16,15 @@ module.exports = {
     const c = room.controller;
     const spawn = room.find(FIND_MY_SPAWNS)[0];
     if (!spawn) return;
-    const x = spawn.pos.x + 2;
-    let y = spawn.pos.y - 4;
+    // 固定画在房间左上角（1,1 起），不跟 spawn 跑、不挡建筑
+    const x = 1;
+    let y = 1.5;
+
+    // 半透明背板（让左上角面板在任何地形上都清晰可读）
+    v.rect(x - 0.5, 0.5, 9.5, 5.2, { fill: '#000', opacity: 0.55, stroke: '#4fc3f7', strokeWidth: 0.05 });
 
     // 标题
-    v.text(`🏠 ${room.name}  RCL${c.level}`, x, y, { align: 'left', color: '#ffd54f', font: 0.7, backgroundColor: '#000', backgroundPadding: 0.1 });
+    v.text(`🏠 ${room.name}  RCL${c.level}`, x, y, { align: 'left', color: '#ffd54f', font: 0.7 });
     y += 1;
 
     // 控制器进度条
@@ -49,12 +53,14 @@ module.exports = {
     v.text(`⚙ CPU ${Game.cpu.getUsed().toFixed(1)}/${Game.cpu.limit}  bucket ${Game.cpu.bucket}`, x, y, { align: 'left', color: '#9c27b0', font: 0.5 });
     y += 0.7;
 
-    // 威胁预警
+    // 威胁预警（画在面板内）
     const hostiles = room.find(FIND_HOSTILE_CREEPS);
     if (hostiles.length) {
-      v.text(`⚠️ 入侵 ${hostiles.length} 敌!`, x, y, { align: 'left', color: '#f44336', font: 0.7, backgroundColor: '#000', backgroundPadding: 0.1 });
-      // 给每个敌人画红圈
+      v.text(`⚠️ 入侵 ${hostiles.length} 敌!`, x, y, { align: 'left', color: '#f44336', font: 0.6 });
+      // 给每个敌人画红圈（这个画在敌人位置，属预警必要）
       for (const h of hostiles) v.circle(h.pos, { radius: 0.5, stroke: '#f44336', fill: 'transparent', strokeWidth: 0.15 });
+    } else {
+      v.text(`✓ 安全`, x, y, { align: 'left', color: '#4caf50', font: 0.5 });
     }
   },
 

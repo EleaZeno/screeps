@@ -33,6 +33,11 @@ function rag(pct, goodHigh) {
 
 module.exports = {
   print() {
+    // 默认 HTML（官方游戏控制台渲染）；若你的查看器不渲染 HTML，
+    // 在控制台输入 textMode() 切纯文本，或 config.dashboardText=true。
+    const cfg = require('config');
+    const useText = (Memory.config && Memory.config.dashboardText) || cfg.dashboardText;
+    if (useText) return this.printText();
     const out = [];
     out.push(`<div style="font-family:Consolas,monospace;font-size:12px;line-height:1.5;background:#1a1a1a;padding:6px 10px;border-radius:6px;border:1px solid #333">`);
     out.push(`<div style="color:#4fc3f7;font-weight:bold;font-size:13px">📊 帝国仪表盘 · tick ${Game.time}</div>`);
@@ -104,5 +109,47 @@ module.exports = {
     out.push(`<div style="color:#555;margin-top:4px;font-size:11px">💡 控制台输入 help() 看全部命令</div>`);
     out.push(`</div>`);
     console.log(out.join(''));
+  },
+
+  // 纯文本降级版（用 ASCII 进度条 + 对齐，任何查看器都能看）
+  printText() {
+    function tbar(pct, width) {
+      const w = width || 12;
+      const f = Math.round(w * Math.min(pct, 100) / 100);
+      return '[' + '█'.repeat(f) + '─'.repeat(Math.max(0, w - f)) + ']';
+    }
+    const L = [];
+    L.push(`📊 帝国仪表盘 · tick ${Game.time}`);
+    for (const rn in Game.rooms) {
+      const room = Game.rooms[rn];
+      if (!room.controller || !room.controller.my) continue;
+      const c = room.controller;
+      const cp = c.progressTotal ? c.progress / c.progressTotal * 100 : 100;
+      const ep = room.energyCapacityAvailable ? room.energyAvailable / room.energyCapacityAvailable * 100 : 0;
+      const counts = {};
+      for (const n in Game.creeps) { if (Game.creeps[n].room.name !== rn) continue; const r = Game.creeps[n].memory.role; counts[r] = (counts[r] || 0) + 1; }
+      const CN = { harvester: '采集', miner: '矿工', hauler: '运输', upgrader: '升级', builder: '建造', defender: '防御', attacker: '进攻' };
+      const roster = Object.keys(counts).map((k) => `${CN[k] || k}${counts[k]}`).join(' ');
+      const h = room.find(FIND_HOSTILE_CREEPS).length;
+      L.push(`🏠 ${rn} RCL${c.level} ${h ? '⚠️敌' + h : '✓安全'}`);
+      L.push(`  控制器 ${tbar(cp)} ${cp.toFixed(1)}% (${c.progress}/${c.progressTotal})`);
+      L.push(`  能量　 ${tbar(ep)} ${room.energyAvailable}/${room.energyCapacityAvailable}`);
+      L.push(`  人口　 ${roster}`);
+    }
+    const ms = (typeof RawMemory !== 'undefined' && RawMemory.get) ? RawMemory.get().length : 0;
+    const pixels = (Game.resources && Game.resources.pixel) || 0;
+    const gp = Game.gcl ? Game.gcl.progress / Game.gcl.progressTotal * 100 : 0;
+    L.push(`⚙️ CPU ${tbar(Game.cpu.getUsed() / Game.cpu.limit * 100)} ${Game.cpu.getUsed().toFixed(1)}/${Game.cpu.limit}`);
+    L.push(`  Bucket ${tbar(Game.cpu.bucket / 100)} ${Game.cpu.bucket}/10000`);
+    L.push(`  内存 ${(ms / 1024).toFixed(0)}KB/2048KB | GCL${Game.gcl ? Game.gcl.level : '?'} ${gp.toFixed(1)}% | 💎${pixels}`);
+    const avg = (Memory.profiler && Memory.profiler.avg) || {};
+    const keys = Object.keys(avg).sort((a, b) => avg[b] - avg[a]).slice(0, 5);
+    if (keys.length) {
+      const LBL = { creeps: 'creep逻辑', spawn: '孵化', intel: '情报', build: '建造', layout: '路网', tower: '塔', sched: '排程', pixel: '像素', visual: '可视化' };
+      L.push(`🔥 热点: ` + keys.map((k) => `${LBL[k] || k}=${avg[k]}`).join('  '));
+    }
+    const pc = pathCache.stats();
+    L.push(`🗺 路径缓存 命中率${pc.hitRate}% (${pc.hits}/${pc.hits + pc.misses}, ${pc.entries}条)`);
+    console.log(L.join('\n'));
   },
 };

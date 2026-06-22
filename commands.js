@@ -31,6 +31,7 @@ module.exports = {
         `<div style="font-family:Consolas,monospace;font-size:12px;background:#1a1a1a;padding:8px 12px;border-radius:6px;border:1px solid #333;line-height:1.6">` +
         `<div style="color:#4fc3f7;font-weight:bold;font-size:13px">🎮 控制台命令大全</div>` +
         cmd('dash()', '立即打印中文图形仪表盘') +
+        cmd('textMode() / htmlMode()', '切换纯文本 / HTML 仪表盘') +
         cmd('prof()', 'CPU 热点排行（找性能瓶颈）') +
         cmd('paths()', '路径缓存命中率') +
         cmd('intel()', '情报/威胁/扩张预案快照') +
@@ -49,6 +50,15 @@ module.exports = {
     }
 
     global.dash = function () { dashboard.print(); return '✅ 仪表盘已刷新'; };
+
+    global.textMode = function () {
+      Memory.config = Memory.config || {}; Memory.config.dashboardText = true;
+      dashboard.print(); return '✅ 已切换纯文本仪表盘（HTML 不渲染时用这个）';
+    };
+    global.htmlMode = function () {
+      Memory.config = Memory.config || {}; Memory.config.dashboardText = false;
+      dashboard.print(); return '✅ 已切换 HTML 图形仪表盘';
+    };
 
     global.prof = function () {
       const hot = profiler.hotspots();
