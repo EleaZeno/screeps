@@ -17,11 +17,17 @@ const TOWER_PER_RCL = { 0: 0, 1: 0, 2: 0, 3: 1, 4: 1, 5: 2, 6: 2, 7: 3, 8: 6 };
 
 module.exports = {
   run(room) {
-    if (Game.time % 50 !== 0) return; // 每 50 tick 规划一次
-
     const spawn = room.find(FIND_MY_SPAWNS)[0];
     if (!spawn) return;
     const rcl = room.controller.level;
+
+    // RCL 刚升级 → 立刻规划（解锁新建筑要马上铺，不等周期，加速扩张）
+    const mem = room.memory;
+    const rclJustChanged = mem._lastRcl !== rcl;
+    mem._lastRcl = rcl;
+    // 平时每 20 tick 规划一次（比原 50 更勤快），RCL 变化时立即规划
+    if (!rclJustChanged && Game.time % 20 !== 0) return;
+    if (rclJustChanged) console.log(`[BUILD] RCL=${rcl} 升级，立即重新规划建造 in ${room.name}`);
 
     // 已有 + 在建的 extension/tower 数
     const exts = this.countStructAndSites(room, STRUCTURE_EXTENSION);
