@@ -25,27 +25,39 @@ module.exports = {
     const dashboard = require('dashboard');
     const profiler = require('cpu.profiler');
     const pathCache = require('path.cache');
+    const statsTracker = require('stats.tracker');
 
-    global.help = function () {
-      console.log(
-        `<div style="font-family:Consolas,monospace;font-size:12px;background:#1a1a1a;padding:8px 12px;border-radius:6px;border:1px solid #333;line-height:1.6">` +
-        `<div style="color:#4fc3f7;font-weight:bold;font-size:13px">🎮 控制台命令大全</div>` +
-        cmd('dash()', '立即打印中文图形仪表盘') +
-        cmd('hud(\'tr\')', 'HUD位置: tl/tr/bl/ctrl/mini/off') +
-        cmd('hud()', '一键显示/隐藏 HUD') +
-        cmd('textMode() / htmlMode()', '切换纯文本 / HTML 仪表盘') +
-        cmd('prof()', 'CPU 热点排行（找性能瓶颈）') +
-        cmd('paths()', '路径缓存命中率') +
-        cmd('intel()', '情报/威胁/扩张预案快照') +
-        cmd('resetProf()', '清空 profiler 重新采样') +
-        cmd('resetPaths()', '清空路径缓存') +
-        cmd("attack('E5N53',4)", '开启进攻：目标房+小队规模') +
-        cmd('stopAttack()', '关闭进攻') +
-        cmd('setOversub(2.0)', '调采集者超额订阅系数') +
-        cmd('pixelOn() / pixelOff()', '开关自动生成 pixel') +
-        `</div>`
-      );
-      return '👆 输入上面任意命令（带括号）执行';
+    global.help = function (cat) {
+      const G = (t) => `<div style="color:#4fc3f7;font-weight:bold;margin-top:5px">${t}</div>`;
+      let body = `<div style="font-family:Consolas,monospace;font-size:12px;background:#1a1a1a;padding:8px 12px;border-radius:6px;border:1px solid #333;line-height:1.6">` +
+        `<div style="color:#ffd54f;font-weight:bold;font-size:14px">🎮 控制台命令大全</div>`;
+      body += G('📊 仪表盘 / 显示');
+      body += cmd('dash()', '打印中文图形仪表盘');
+      body += cmd('hud(\'tr\')', 'HUD位置: tl/tr/bl/ctrl/mini/off');
+      body += cmd('hud()', '一键显示/隐藏 HUD');
+      body += cmd('textMode()/htmlMode()', '切纯文本 / HTML 仪表盘');
+      body += G('📈 统计 / 预测');
+      body += cmd('stats()', '过往100tick平均统计(能量流入/CPU/人口)');
+      body += cmd('eta()', '预测距下一级RCL/GCL还要多久');
+      body += cmd('prof()', 'CPU 热点排行');
+      body += cmd('paths()', '路径缓存命中率');
+      body += cmd('intel()', '情报/威胁/扩张快照');
+      body += G('🗺 侦察 / 房间');
+      body += cmd('neighbors()', '扫描四邻房间所有者+等级');
+      body += cmd('roomInfo(\'E9N52\')', '某房详情');
+      body += cmd('creeps()', '列出所有 creep 及状态');
+      body += G('⚙️ 控制 / 调参');
+      body += cmd('setOversub(2.0)', '调采集者超额订阅系数');
+      body += cmd('attack(\'E9N51\',4)', '开启进攻：目标房+小队规模');
+      body += cmd('stopAttack()', '关闭进攻');
+      body += cmd('pixelOn()/pixelOff()', '开关自动生成 pixel');
+      body += cmd('say(\'name\',\'文字\')', '让某 creep 说话(调试/好玩)');
+      body += G('🧹 重置');
+      body += cmd('resetProf()/resetPaths()', '清空 profiler / 路径缓存');
+      body += cmd('resetStats()', '清空滞动统计重新采样');
+      body += `</div>`;
+      console.log(body);
+      return '👆 输入任意命令（带括号）执行';
     };
     function cmd(c, desc) {
       return `<div style="color:#aaa">　<span style="color:#ffd54f;font-weight:bold">${c.replace(/</g, '&lt;')}</span> <span style="color:#666">—</span> ${desc}</div>`;
@@ -95,6 +107,88 @@ module.exports = {
 
     global.resetProf = function () { Memory.profiler = { avg: {}, last: {}, samples: 0 }; return '✅ profiler 已清空，重新采样中'; };
     global.resetPaths = function () { Memory.pathCache = { entries: {}, hits: 0, misses: 0 }; return '✅ 路径缓存已清空'; };
+    global.resetStats = function () { Memory.stats2 = {}; return '✅ 滞动统计已清空，重新采样中'; };
+
+    // 过往 N tick 平均统计
+    global.stats = function (roomName) {
+      const rn = roomName || Object.keys(Game.rooms).find((r) => Game.rooms[r].controller && Game.rooms[r].controller.my);
+      const st = statsTracker.compute(rn);
+      if (!st) return '⚠ 数据不足（刚重启？再等几 tick）';
+      console.log(
+        `<div style="font-family:Consolas,monospace;font-size:12px;background:#1a1a1a;padding:8px 12px;border-radius:6px;border:1px solid #333;line-height:1.7">` +
+        `<div style="color:#4fc3f7;font-weight:bold">📈 ${rn} 过往 ${st.window} tick 统计</div>` +
+        `<div style="color:#aaa">　能量净流入　<b style="color:${st.eRate >= 0 ? '#4caf50' : '#f44336'}">${st.eRate >= 0 ? '+' : ''}${st.eRate}/tick</b></div>` +
+        `<div style="color:#aaa">　控制器增长　<b style="color:#4fc3f7">+${st.cpRate}/tick</b></div>` +
+        `<div style="color:#aaa">　CPU 平均/峰值 <b style="color:#ce93d8">${st.cpuAvg} / ${st.cpuMax}</b></div>` +
+        `<div style="color:#aaa">　平均 creep 数 <b style="color:#ccc">${st.creepAvg}</b></div>` +
+        `<div style="color:#666;font-size:11px">　(采样 ${st.samples} 点)</div></div>`
+      );
+      return '✅';
+    };
+
+    // 预测距下一级 ETA（基于过往平均速率）
+    global.eta = function () {
+      const out = [];
+      for (const rn in Game.rooms) {
+        const room = Game.rooms[rn];
+        if (!room.controller || !room.controller.my) continue;
+        const t = statsTracker.etaNextLevel(room);
+        const fmt = (ticks) => { if (!ticks) return '?'; const sec = ticks * 3.33; if (sec < 3600) return Math.round(sec / 60) + '分钟'; return (sec / 3600).toFixed(1) + '小时'; };
+        out.push(`🏠 ${rn} RCL${room.controller.level}→${room.controller.level + 1}: ${t ? `约 ${t} tick (${fmt(t)})` : '数据不足/未增长'}`);
+      }
+      // GCL ETA
+      const gst = Memory.stats2 && Object.keys(Memory.stats2)[0];
+      console.log(out.join('\n'));
+      return `🌐 GCL${Game.gcl ? Game.gcl.level : '?'} ${Game.gcl ? (Game.gcl.progress / Game.gcl.progressTotal * 100).toFixed(1) : '?'}% (到 GCL${(Game.gcl ? Game.gcl.level : 0) + 1} 需 ${Game.gcl ? (Game.gcl.progressTotal - Game.gcl.progress).toLocaleString() : '?'} 点)`;
+    };
+
+    // 扫描四邻房间（需有视野或用已缓存情报；这里用 Game.map 拿基础信息）
+    global.neighbors = function () {
+      const home = Object.keys(Game.rooms).find((r) => Game.rooms[r].controller && Game.rooms[r].controller.my);
+      if (!home) return '⚠ 无主房';
+      const ex = Game.map.describeExits(home);
+      const dir = { 1: '上(N)', 3: '右(E)', 5: '下(S)', 7: '左(W)' };
+      const out = [`🧭 ${home} 四邻：`];
+      for (const d in ex) {
+        const rn = ex[d];
+        let info = rn;
+        const room = Game.rooms[rn];
+        if (room && room.controller) {
+          if (room.controller.owner) info += ` [${room.controller.owner.username} RCL${room.controller.level}]`;
+          else info += ' [无主]';
+        } else info += ' [无视野，需斛候]';
+        out.push(`　${dir[d] || d}: ${info}`);
+      }
+      console.log(out.join('\n'));
+      return '💡 详细等级需有视野，可派斛候或看地图';
+    };
+
+    global.roomInfo = function (rn) {
+      const room = Game.rooms[rn];
+      if (!room) return `⚠ ${rn} 无视野`;
+      const c = room.controller;
+      const src = room.find(FIND_SOURCES).length;
+      const my = room.find(FIND_MY_STRUCTURES).length;
+      const en = room.find(FIND_HOSTILE_CREEPS).length;
+      return `🏠 ${rn}: ${c ? (c.owner ? c.owner.username + ' RCL' + c.level : (c.my ? '我的 RCL' + c.level : '无主')) : '无控制器'} | ${src}矿 | 建筑${my} | 敌${en}`;
+    };
+
+    global.creeps = function () {
+      const out = [];
+      for (const n in Game.creeps) {
+        const c = Game.creeps[n];
+        out.push(`　${c.memory.role || '?'} ${n} @${c.room.name}(${c.pos.x},${c.pos.y}) hp${c.hits}/${c.hitsMax} 能${c.store ? c.store[RESOURCE_ENERGY] : 0}`);
+      }
+      console.log(`👥 共 ${out.length} 个 creep：\n` + out.join('\n'));
+      return '✅';
+    };
+
+    global.say = function (name, text) {
+      const c = Game.creeps[name];
+      if (!c) return `⚠ 找不到 creep: ${name}`;
+      c.say(text || '👋', true);
+      return `✅ ${name} 说：${text}`;
+    };
 
     global.attack = function (targetRoom, squadSize) {
       Memory.config = Memory.config || {};

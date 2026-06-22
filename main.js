@@ -29,6 +29,7 @@ const pathCache = require('path.cache');
 const dashboard = require('dashboard');
 const commands = require('commands');
 const visual = require('visual');
+const statsTracker = require('stats.tracker');
 
 const ROLES = {
   harvester: require('role.harvester'),
@@ -89,6 +90,7 @@ module.exports.loop = function () {
 
   // 5. 控制台 dashboard（每 N tick）
   profiler.tickDone();
+  statsTracker.sample(); // 每 tick 采样关键指标（滞动统计）
   if (Game.time % (config.dashboardInterval || 15) === 0) dashboard.print();
 };
 

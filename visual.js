@@ -134,6 +134,13 @@ module.exports = {
     // CPU + bucket
     push(`⚙ CPU ${Game.cpu.getUsed().toFixed(1)}/${Game.cpu.limit} bkt ${Game.cpu.bucket}`, '#ce93d8');
 
+    // 过往 N tick 平均统计（能量净流入 + 控制器增长）
+    try {
+      const tracker = require('stats.tracker');
+      const st = tracker.compute(room.name);
+      if (st) push(`📈 ${st.window}t均: 能${st.eRate >= 0 ? '+' : ''}${st.eRate}/t CPU${st.cpuAvg}`, '#80cbc4');
+    } catch (e) { /* ignore */ }
+
     // 威胁详情
     if (hostiles.length) {
       let atk = 0, heal = 0;
