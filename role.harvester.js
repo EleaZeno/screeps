@@ -55,6 +55,27 @@ module.exports = {
         }
       }
     } else {
+      // 【免疫系统·求生优先】紧急模式下，先捍起身边最近的掘落能量/容器能量
+      // （比跑去远处 source 现采快得多），快速把能量运回 spawn 脱困。
+      // 可救命：死亡螺旋时地上常有上一波 creep 死后/溢出的能量在白白蒸发。
+      const guardian = require('colony.guardian');
+      if (guardian.isEmergency()) {
+        const drop = creep.pos.findClosestByRange(FIND_DROPPED_RESOURCES, {
+          filter: (rr) => rr.resourceType === RESOURCE_ENERGY && rr.amount >= 20,
+        });
+        if (drop) {
+          if (creep.pickup(drop) === ERR_NOT_IN_RANGE) utils.moveTo(creep, drop, '#ff0000');
+          return;
+        }
+        const cont = creep.pos.findClosestByRange(FIND_STRUCTURES, {
+          filter: (s) => s.structureType === STRUCTURE_CONTAINER && s.store[RESOURCE_ENERGY] > 0,
+        });
+        if (cont) {
+          if (creep.withdraw(cont, RESOURCE_ENERGY) === ERR_NOT_IN_RANGE) utils.moveTo(creep, cont, '#ff0000');
+          return;
+        }
+        // 地上/容器都没现成能量 → 落到下方正常采矿逻辑
+      }
       // 采集：分配专属开采格（调度器），走到那一格采 —— 根上消除抢位冲突
       if (!creep.memory.slot) {
         scheduler.assignSlot(creep);
