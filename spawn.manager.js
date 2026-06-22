@@ -129,10 +129,14 @@ module.exports = {
           if (res === OK || res === ERR_NOT_ENOUGH_ENERGY) return;
         }
       }
+      // 【修复 2026-06-23·controller 冻结】原 targets 把 upgrader 放最后，且 builder=4 优先；
+      //   结果多 harvester+builder 把名额占满，upgrader 永不孵化 → controller 永不升级（甚至面临降级）。
+      //   修复：保证先出 1 个 upgrader（防冻结/防降级），再 builder，最后才是激进的多 upgrader。
       targets = [
         ['miner', numSources],
         ['hauler', this.haulerTarget(room, numSources)],
-        ['builder', hasConstruction ? 4 : 0],
+        ['upgrader', 1],                                  // 保底：始终至少 1 个 upgrader 在升 controller
+        ['builder', hasConstruction ? 2 : 0],             // builder 4→2，不独占能量
         ['upgrader', infraComplete ? this.upgraderTarget(room, rcl) : 1],
       ];
     } else if (rcl >= 2) {
