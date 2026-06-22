@@ -1,0 +1,85 @@
+'use strict';
+
+/*
+ * source.manager.js
+ * ------------------------------------------------------------------
+ * Source 容量计算 + harvester 固定分配（取代原来的"贝叶斯打分"）
+ *
+ * 核心思想：
+ *  - 每个 Source 周围的"可站立空地数"决定它最多能容纳几个采集者
+ *  - harvester 一旦绑定某个 source，就一直采它，不抢不挤
+ *  - 这是确定性最优分配，比每 tick 概率计算又快又稳
+ */
+
+module.exports = {
+  /**
+   * 计算并缓存房间内每个 source 的开采位（mining spot）数量。
+   * 只在未缓存或地形可能变化时计算，平时直接读缓存，几乎不耗 CPU。
+   */
+  ensureSourceCapacity(room) {
+    if (!room.memory.sources) room.memory.sources = {};
+
+    const sources = room.find(FIND_SOURCES);
+    for (const source of sources) {
+      if (room.memory.sources[source.id] !== undefined) continue; // 已缓存
+
+      // 数 source 周围 8 格里非墙（可站人）的格子数 = 最大采集者数
+      const terrain = room.getTerrain();
+      let openSpots = 0;
+      for (let dx = -1; dx <= 1; dx++) {
+        for (let dy = -1; dy <= 1; dy++) {
+          if (dx === 0 && dy === 0) continue;
+          const x = source.pos.x + dx;
+          const y = source.pos.y + dy;
+          if (x < 0 || x > 49 || y < 0 || y > 49) continue;
+          if (terrain.get(x, y) !== TERRAIN_MASK_WALL) openSpots++;
+        }
+      }
+      room.memory.sources[source.id] = openSpots;
+    }
+  },
+
+  /**
+   * 为一个还没绑定 source 的 harvester 分配一个"还没坐满"的 source。
+   * 返回 source.id 或 null（全坐满时）。
+   */
+  assignSource(creep) {
+    const room = creep.room;
+    if (!room.memory.sources) this.ensureSourceCapacity(room);
+
+    // 统计每个 source 当前已绑定多少 harvester
+    const assigned = {};
+    for (const name in Game.creeps) {
+      const c = Game.creeps[name];
+      if (c.memory.role === 'harvester' && c.memory.sourceId) {
+        assigned[c.memory.sourceId] = (assigned[c.memory.sourceId] || 0) + 1;
+      }
+    }
+
+    const sources = room.find(FIND_SOURCES);
+    // 选"剩余空位最多"的 source，让采集者均匀分布
+    let best = null;
+    let bestFree = 0;
+    for (const source of sources) {
+      const cap = room.memory.sources[source.id] || 1;
+      const free = cap - (assigned[source.id] || 0);
+      if (free > bestFree) {
+        bestFree = free;
+        best = source;
+      }
+    }
+    if (best) {
+      creep.memory.sourceId = best.id;
+      return best.id;
+    }
+    return null;
+  },
+
+  /** 房间内所有 source 的总开采位（用于决定 harvester 上限） */
+  totalMiningSpots(room) {
+    if (!room.memory.sources) this.ensureSourceCapacity(room);
+    let total = 0;
+    for (const id in room.memory.sources) total += room.memory.sources[id];
+    return total;
+  },
+};
