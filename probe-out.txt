@@ -1,0 +1,7 @@
+STATUS:200
+Total creeps: 18
+controller.progress: 6601
+controller.level: 2
+Miners: 2
+Haulers: 2
+Body tally: {"work":27,"carry":33,"move":35}
