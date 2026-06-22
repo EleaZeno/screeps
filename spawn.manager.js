@@ -130,7 +130,20 @@ module.exports = {
       for (let i = 0; i < pairs; i++) { body.push(CARRY); body.push(MOVE); }
       return body;
     }
-    // harvester / upgrader / builder：均衡单元
+    // harvester：source 位置有限时优先堆 WORK（采得快），少量 CARRY/MOVE
+    if (role === 'harvester') {
+      const body = [];
+      let e = energyCap;
+      let work = 0;
+      // 先尽量堆 WORK（每个100，最多6个=12能量/tick≈榨干source）
+      while (e >= 100 && work < 6 && e - 100 >= 100) { body.push(WORK); e -= 100; work++; }
+      // 再保证至少 1 CARRY + 足够 MOVE
+      body.push(CARRY); e -= 50;
+      const moves = Math.max(1, Math.ceil(body.length / 2));
+      for (let i = 0; i < moves && e >= 50; i++) { body.push(MOVE); e -= 50; }
+      return body.length >= 3 ? body : [WORK, CARRY, MOVE];
+    }
+    // upgrader / builder：均衡单元
     const units = Math.max(1, Math.min(8, Math.floor(energyCap / 200)));
     const body = [];
     for (let i = 0; i < units; i++) { body.push(WORK); body.push(CARRY); body.push(MOVE); }
