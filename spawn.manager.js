@@ -63,12 +63,16 @@ module.exports = {
         ['upgrader', rushInfra ? 1 : this.upgraderTarget(room, rcl)],
       ];
     } else {
-      // 早期 harvester 模式（RCL1）
+      // 早期 harvester 模式（RCL1）：快速扩张——少量采集者 + 立刻上 upgrader 狂升 controller 冲 RCL/GCL
       const spots = sourceManager.totalMiningSpots(room);
+      // RCL1 只需 2-3 个 harvester 就能填满能量，多了浪费；剩余能量全砂 upgrader 升级
+      const harvTarget = Math.min(spots, rcl <= 1 ? 3 : 4);
       targets = [
-        ['harvester', Math.min(spots, rcl <= 1 ? 4 : spots)],
+        ['harvester', Math.min(2, harvTarget)],   // 先保 2 个采集者入账
+        ['upgrader', 2],                          // 立刻两个 upgrader 狂升 controller（保证 RCL 上涨）
+        ['harvester', harvTarget],                // 再补足采集者
         ['builder', hasConstruction ? (rushInfra ? 3 : config.population.buildersWithSites) : 0],
-        ['upgrader', rushInfra ? 1 : this.upgraderTarget(room, rcl)],
+        ['upgrader', rushInfra ? 2 : this.upgraderTarget(room, rcl)],
       ];
     }
 
@@ -102,11 +106,12 @@ module.exports = {
   upgraderTarget(room, rcl) {
     let base = config.population.upgradersBase;
     if (config.economy.aggressiveUpgrade) {
-      // 能量储备多 → 多派 upgrader 冲 RCL
+      // 能量储备多 → 狂派 upgrader 冲 RCL/GCL（快速扩张核心：能量全砂 controller）
       const storage = room.storage;
-      if (storage && storage.store[RESOURCE_ENERGY] > 5000) base += 3;
-      else if (room.energyAvailable >= room.energyCapacityAvailable * 0.8) base += 1;
-      if (rcl >= 3 && rcl < 8) base += 1;
+      if (storage && storage.store[RESOURCE_ENERGY] > 10000) base += 6;
+      else if (storage && storage.store[RESOURCE_ENERGY] > 5000) base += 4;
+      else if (room.energyAvailable >= room.energyCapacityAvailable * 0.8) base += 2;
+      if (rcl >= 3 && rcl < 8) base += 2;
     }
     return base;
   },
