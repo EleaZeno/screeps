@@ -167,12 +167,10 @@ module.exports = {
     }
     // harvester：source 位置有限时优先堆 WORK（采得快），少量 CARRY/MOVE
     if (role === 'harvester') {
+      const work = this.harvesterWorkCount(energyCap);
       const body = [];
       let e = energyCap;
-      let work = 0;
-      // 先尽量堆 WORK（每个100，最多6个=12能量/tick≈榨干source）
-      while (e >= 100 && work < 6 && e - 100 >= 100) { body.push(WORK); e -= 100; work++; }
-      // 再保证至少 1 CARRY + 足够 MOVE
+      for (let i = 0; i < work; i++) { body.push(WORK); e -= 100; }
       body.push(CARRY); e -= 50;
       const moves = Math.max(1, Math.ceil(body.length / 2));
       for (let i = 0; i < moves && e >= 50; i++) { body.push(MOVE); e -= 50; }
@@ -186,6 +184,36 @@ module.exports = {
   },
 
   /**
+   * 【S2 动态平衡】hauler 数 = 按平均 source→spawn 路程算：路越远需越多。
+   * 从 scheduler 预算的 slot.dist 取均值，避免写死 2/source 造成近房空跑/远房不够。
+   */
+  haulerTarget(room, numSources) {
+    const slots = room.memory.slots;
+    let avgDist = 15;
+    if (slots && slots.all && slots.all.length) {
+      const bySrc = {};
+      for (const t of slots.all) {
+        if (bySrc[t.sourceId] === undefined || t.dist < bySrc[t.sourceId]) bySrc[t.sourceId] = t.dist;
+      }
+      const dists = Object.keys(bySrc).map((k) => bySrc[k]);
+      if (dists.length) avgDist = dists.reduce((a, b) => a + b, 0) / dists.length;
+    }
+    const cap = room.energyCapacityAvailable;
+    const carryCap = Math.max(2, Math.min(8, Math.floor(cap / 100))) * 50;
+    const perSource = Math.max(1, Math.ceil((2 * avgDist * 10) / carryCap));
+    return Math.min(numSources * perSource, numSources * 4); // 封顶 4/source
+  },
+
+  /**
+   * 【M4 修复·单一权威公式】采集者 body 的 WORK 数 = floor((cap-50)/100) 上限6。
+   * buildBody 和 recycleObsolete 都用此函数，两边口径永远一致，杜绝换号抖动。
+   */
+  harvesterWorkCount(cap) {
+    // 留 50 给 CARRY，其余每 100 一个 WORK，最多 6（≈榨干 source 的 12 能量/tick）
+    return Math.max(1, Math.min(6, Math.floor((cap - 50) / 100)));
+  },
+
+  /**
    * 主动淘汰过时小号：cap 提升后，body 远小于当前能造的最大号的采集者，
    * 标记 recycle。creep 逻辑里看到 recycle 标记会跑回 spawn 自我拆解返还能量。
    * 哲学：中央调度统一决策，旧号不达标主动换新，不留低效单位。
@@ -194,7 +222,7 @@ module.exports = {
     // 基建未建完时不回收（避免青黄不接停采），只在 cap≥500 静态期做新陈代谢
     if (cap < 500) return;
     if (Game.time % 10 !== 0) return; // 低频检查省 CPU
-    const idealWork = Math.min(6, Math.floor((cap - 50) / 100)); // 当前能造的采集者 WORK 数
+    const idealWork = this.harvesterWorkCount(cap); // 【M4】与 buildBody 同一公式
     let marked = 0;
     for (const name in Game.creeps) {
       if (marked >= 1) break; // 每次最多换 1 个，平滑过渡
@@ -203,7 +231,7 @@ module.exports = {
       if (c.memory.role !== 'harvester') continue;
       if (c.memory.recycle) continue;
       const work = c.getActiveBodyparts(WORK);
-      // 现役号比理想号小一半以上 → 过时，标记回收
+      // 现役号比理想号小一半以上 → 过时，标记回收（idealWork-2 确保不会刚换就被判过时）
       if (work > 0 && work <= idealWork - 2) {
         c.memory.recycle = true;
         marked++;

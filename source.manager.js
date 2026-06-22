@@ -40,8 +40,8 @@ module.exports = {
   },
 
   /**
-   * 为一个还没绑定 source 的 harvester 分配一个"还没坐满"的 source。
-   * 返回 source.id 或 null（全坐满时）。
+   * 【S1 已废弃·保留傅兼容】harvester 现由 source.scheduler.assignSlot 统一分配
+   * （它会同时设好 slot 和 sourceId）。本方法仅作紧急回退，勿再新增调用。
    */
   assignSource(creep) {
     const room = creep.room;
@@ -75,8 +75,15 @@ module.exports = {
     return null;
   },
 
-  /** 房间内所有 source 的总开采位（用于决定 harvester 上限） */
+  /**
+   * 【S1 统一】房间总开采位：委托给 source.scheduler（唯一权威调度源）。
+   * scheduler 的精确格子数才是真实可占位数；未规划时回退到本地 8 邻粗算。
+   */
   totalMiningSpots(room) {
+    const scheduler = require('source.scheduler');
+    const slots = scheduler.totalSlots(room);
+    if (slots > 0) return slots;
+    // scheduler 未规划完成时的回退（起步几 tick）
     if (!room.memory.sources) this.ensureSourceCapacity(room);
     let total = 0;
     for (const id in room.memory.sources) total += room.memory.sources[id];

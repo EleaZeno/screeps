@@ -44,7 +44,7 @@ const ROLES = {
 module.exports.loop = function () {
   profiler.init(config.profiler !== false);
   pathCache.init();
-  commands.register(); // 注册控制台交互命令（help/dash/prof/attack 等）
+  if (!global.__cmdRegistered) { commands.register(); global.__cmdRegistered = true; } // 【M1】只注册一次，不每 tick 重挂
   const _t0 = profiler.start();
 
   // 0. Memory 初始化
@@ -93,23 +93,3 @@ module.exports.loop = function () {
   statsTracker.sample(); // 每 tick 采样关键指标（滞动统计）
   if (Game.time % (config.dashboardInterval || 15) === 0) dashboard.print();
 };
-
-function reportStats_DEPRECATED() {
-  for (const roomName in Game.rooms) {
-    const room = Game.rooms[roomName];
-    if (!room.controller || !room.controller.my) continue;
-    const counts = {};
-    for (const name in Game.creeps) {
-      if (Game.creeps[name].room.name !== roomName) continue;
-      const r = Game.creeps[name].memory.role;
-      counts[r] = (counts[r] || 0) + 1;
-    }
-    const c = room.controller;
-    const pct = c.progressTotal ? ((c.progress / c.progressTotal) * 100).toFixed(1) : '100';
-    const roster = Object.keys(counts).map((k) => `${k[0].toUpperCase()}:${counts[k]}`).join(' ');
-    const pixels = (Game.resources && Game.resources.pixel) || 0;
-    console.log(
-      `[${roomName}] RCL${c.level} ${pct}% | E ${room.energyAvailable}/${room.energyCapacityAvailable} | ${roster} | CPU ${Game.cpu.getUsed().toFixed(1)}/${Game.cpu.limit} bucket ${Game.cpu.bucket} pixel ${pixels}`
-    );
-  }
-}
