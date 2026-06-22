@@ -16,6 +16,8 @@ module.exports = {
     rushInfra: true,           // RCL≤3 且有工地时，优先突击建 extension（打破低RCL死循环，加速发育）
     layoutPlanning: true,      // 用空闲 CPU 预计算基地布局+道路网络，缓存后低耗执行
     harvesterOversub: 1.6,     // 采集者超额订阅系数：实际人数 = 开采格数×此值（总有人在送货路上，多出的轮替补位）
+    intelPlanning: true,       // 用闲置 CPU/内存预计算情报/威胁/扩张预案/距离矩阵（CPU 仅用 18%，内存仅 1.7%，全面利用）
+    intelReserveBucket: 4000,  // intel 任务的 bucket 保留水位：低于此值不跑重计算，绝不抢主循环 CPU
   },
 
   // ---- 军事：防御常开，进攻默认关 ----

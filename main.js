@@ -23,6 +23,7 @@ const buildPlanner = require('build.planner');
 const towerManager = require('tower.manager');
 const cpuManager = require('cpu.manager');
 const layoutPlanner = require('layout.planner');
+const intelManager = require('intel.manager');
 
 const ROLES = {
   harvester: require('role.harvester'),
@@ -69,6 +70,9 @@ module.exports.loop = function () {
 
   // 4. 闲置 CPU 变现：bucket 满时自动生成 pixel（全局每 tick 检查一次）
   if (config.economy.autoPixel) cpuManager.run();
+
+  // 4b. 闲置 CPU/内存全面利用：预计算情报/威胁/扩张预案/距离矩阵（严格 bucket 门控）
+  if (config.economy.intelPlanning) intelManager.run(config.economy.intelReserveBucket);
 
   // 5. 轻量统计（每 10 tick）
   if (Game.time % 10 === 0) reportStats();
