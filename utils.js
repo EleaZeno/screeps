@@ -8,18 +8,42 @@
 
 module.exports = {
   /**
-   * 统一移动接口：CPU 只算一次最优路径，之后多 tick 反复复用（不每 tick 重算）。
-   * 原理：Screeps 引擎的 moveTo 会把路径序列化存进 creep.memory._move，
-   * reusePath=N 表示这条路径复用 N tick 才重算一次。把 N 调大
-   * = “算一次、走很久”，完全符合你要的“隔一段算一次反复调用”。
-   * 静态采矿/固定往返场景路线不变，复用很长也不会错；被堵了引擎会自动让路。
+   * 统一移动接口：CPU 只算一次最优路径复用，+ 防堵塞三级决策。
+   * 防堵逻辑（你说的调度平衡）：检测原地卡顿几 tick 后，CPU 在三选一里升级：
+   *   ≤1 tick 原地未动：正常（可能刚好会合/疲劳），不管
+   *   2 tick 卡：重算路径且避让别人（ignoreCreeps:false 强制绕路）= “绕远路”
+   *   ≥4 tick 卡：据弃缓存重走全新路 + 随机抩一下（防死锁）= 换路线
+   * 路线稳定时复用 30 tick（算一次走很久，省 CPU）。
    */
   moveTo(creep, target, color) {
+    const m = creep.memory;
+    // 卡顿检测：与上一 tick 位置相同 → stuck 计数，不同 → 清零
+    if (m._mx === creep.pos.x && m._my === creep.pos.y) m._stk = (m._stk || 0) + 1;
+    else m._stk = 0;
+    m._mx = creep.pos.x; m._my = creep.pos.y;
+
+    let reuse = 30;          // 默认：路线稳定，算一次复用 30 tick
+    let ignoreCreeps = false;
+    const stk = m._stk || 0;
+
+    if (stk >= 4) {
+      // 重度卡顿 → 换路线：据弃缓存路径重算全新路 + 随机抩一步防死锁
+      reuse = 0;
+      delete m._move;
+      if (stk >= 6) {
+        const dirs = [TOP, TOP_RIGHT, RIGHT, BOTTOM_RIGHT, BOTTOM, BOTTOM_LEFT, LEFT, TOP_LEFT];
+        creep.move(dirs[Math.floor(Math.random() * 8)]); // 随机挪一格打破对撞死锁
+      }
+    } else if (stk >= 2) {
+      // 轻度卡顿 → 绕远路：重算路径且避让其他 creep
+      reuse = 0;
+    }
+
     return creep.moveTo(target, {
-      reusePath: 30,                      // 算一次复用 30 tick（原来是 8）→ 寻路 CPU 降 ~75%
-      serializeMemory: true,              // 路径序列化存内存（紧凑，用闲置内存换 CPU）
-      visualizePathStyle: color ? { stroke: color, opacity: 0.15 } : undefined,
-      ignoreCreeps: false,
+      reusePath: reuse,
+      serializeMemory: true,
+      ignoreCreeps,
+      visualizePathStyle: color ? { stroke: stk >= 2 ? '#ff5555' : color, opacity: 0.15 } : undefined,
     });
   },
 
