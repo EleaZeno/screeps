@@ -132,10 +132,18 @@ module.exports = {
       push(`🗼 塔${towers.length} ${bar(tc ? te / tc : 0, 5)}`, '#90a4ae');
     }
 
+    // 基建完成度（发育哲学：未完成=专心建设，完成=才冲级）
+    try {
+      const infra = require('infra');
+      const st = infra.status(room);
+      if (st.extNeed > 0) {
+        const done = st.complete;
+        push(`🏗 基建 ${st.extBuilt}/${st.extNeed}ext ${st.containersReady ? '✓罐' : '✗罐'} ${done ? '→可冲级' : '→建设中'}`, done ? '#4caf50' : '#ff9800');
+      }
+    } catch (e) { /* ignore */ }
+
     // CPU + bucket
     push(`⚙ CPU ${Game.cpu.getUsed().toFixed(1)}/${Game.cpu.limit} bkt ${Game.cpu.bucket}`, '#ce93d8');
-
-    // 过往 N tick 平均统计（能量净流入 + CPU，用分钟描述窗口）
     try {
       const tracker = require('stats.tracker');
       const st = tracker.compute(room.name);
