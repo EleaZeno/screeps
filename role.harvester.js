@@ -3,10 +3,10 @@
 /*
  * role.harvester.js — 采集者
  * ------------------------------------------------------------------
- * 改进：
- *  - 绑定固定 source（source.manager 分配），不抢不挤
+ *  - 绑定固定 source（scheduler 分配专属开采格），不抢不挤
  *  - 满仓后用 utils 找最优回填目标（spawn>extension>tower>storage）
  *  - working 状态机：满了去送，空了回去采，减少抖动
+ *  - 【防卡死】到不了专属格时不死磕，直接走向 source 本体采矿
  */
 
 const sourceManager = require('source.manager');
@@ -15,7 +15,7 @@ const utils = require('utils');
 
 module.exports = {
   run(creep) {
-    // 中央调度标记回收（过时小号）：跑回 spawn 拆解返还能量，不浪费
+    // 中央调度标记回收（过时小号）：跑回 spawn 拆解返还能量
     if (creep.memory.recycle) {
       const spawn = creep.pos.findClosestByRange(FIND_MY_SPAWNS);
       if (spawn) {
@@ -32,7 +32,7 @@ module.exports = {
     }
     if (!creep.memory.working && creep.store.getFreeCapacity() === 0) {
       creep.memory.working = true;
-      creep.say('🚚');
+      creep.say('🚮');
     }
 
     if (creep.memory.working) {
@@ -44,14 +44,12 @@ module.exports = {
         }
       } else {
         // 所有存储都满了，能量溢出。发育哲学：基建未完成时，
-        // 溢出能量优先去帮忙建造（而不是去升级 controller），把能量锁在建设上。
+        // 溢出能量优先去帮忙建造（而不是去升级 controller），把能量锁在建造上。
         const site = creep.pos.findClosestByRange(FIND_CONSTRUCTION_SITES);
         const infra = require('infra');
         if (site && !infra.isComplete(creep.room)) {
-          // 基建未完成 + 有工地 → 去建造
           if (creep.build(site) === ERR_NOT_IN_RANGE) utils.moveTo(creep, site, '#ffdd00');
         } else {
-          // 基建已完成（或无工地）：才去升级 controller，别站着浪费
           const ctrl = creep.room.controller;
           if (ctrl && creep.upgradeController(ctrl) === ERR_NOT_IN_RANGE) utils.moveTo(creep, ctrl, '#66ccff');
         }
@@ -63,7 +61,7 @@ module.exports = {
       }
       const slot = creep.memory.slot;
       let source = creep.memory.sourceId ? Game.getObjectById(creep.memory.sourceId) : null;
-      // 绑定 source 没能量了，临时找个有能量的
+      // 绑定 source 没能量了，临时找一个有能量的活跃 source
       if (!source || source.energy === 0) {
         source = creep.pos.findClosestByRange(FIND_SOURCES_ACTIVE);
         if (source) {
@@ -71,17 +69,25 @@ module.exports = {
         }
         return;
       }
-      // 有专属格子：先走到格子上（避免多人振在同一格互堵），再采
-      if (slot && (creep.pos.x !== slot.x || creep.pos.y !== slot.y)) {
-        // 已在 source 旁且能采到就直接采，否则走向专属格
-        if (creep.pos.isNearTo(source)) {
-          creep.harvest(source);
-        } else {
-          creep.moveTo(slot.x, slot.y, { reusePath: 30, visualizePathStyle: { stroke: '#ffaa00', opacity: 0.15 } });
-        }
-      } else if (creep.harvest(source) === ERR_NOT_IN_RANGE) {
-        utils.moveTo(creep, source, '#ffaa00');
+
+      // ——【防卡死核心修复】——
+      // 1. 只要已紧挨 source，不管有没有专属格，直接采（最高优先，立刻产出）
+      if (creep.pos.isNearTo(source)) {
+        creep.harvest(source);
+        return;
       }
+      // 2. 未挨到 source：默认走向 source 本体；
+      //    若有专属格且该格“空着或就是自己占的”，才走向专属格；
+      //    若专属格被别人占了 → 放弃死磕，直接走向 source（之前 oversub>1 多出来的
+      //    creep 被分到已占格 → moveTo 走不过去 + reusePath 缓存死路 → 原地卡死）。
+      let dest = source.pos;
+      if (slot) {
+        const occ = creep.room.lookForAt(LOOK_CREEPS, slot.x, slot.y)[0];
+        if (!occ || occ.name === creep.name) {
+          dest = new RoomPosition(slot.x, slot.y, creep.room.name);
+        }
+      }
+      utils.moveTo(creep, dest, '#ffaa00');
     }
   },
 };

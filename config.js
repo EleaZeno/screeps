@@ -14,7 +14,7 @@ module.exports = {
     autoBuild: true,           // 自动规划建造 extension/container/road/tower
     autoPixel: true,           // bucket 满 10000 时自动生成 pixel（闲置 CPU 变现）
     layoutPlanning: true,      // 用空闲 CPU 预计算基地布局+道路网络，缓存后低耗执行
-    harvesterOversub: 2.0,     // 采集者超额订阅系数（从1.6提到2.0）：实际人数 = 开采格数×此值（总有人在送货路上，多出的轮替补位，榚干每点能量）
+    harvesterOversub: 1.3,     // 采集者超额订阅系数（2.0→1.3）：实际人数=开采格×此值。过高(2.0)会让多余采集者被分到已占格→卡死在spawn旁，1.3兼顾补位与不拥堵
     intelPlanning: true,       // 用闲置 CPU/内存预计算情报/威胁/扩张预案/距离矩阵（CPU 仅用 18%，内存仅 1.7%，全面利用）
     intelReserveBucket: 4000,  // intel 任务的 bucket 保留水位：低于此值不跑重计算，绝不抢主循环 CPU
   },
