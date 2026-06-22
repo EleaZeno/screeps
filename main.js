@@ -21,6 +21,7 @@ const sourceManager = require('source.manager');
 const buildPlanner = require('build.planner');
 const towerManager = require('tower.manager');
 const cpuManager = require('cpu.manager');
+const layoutPlanner = require('layout.planner');
 
 const ROLES = {
   harvester: require('role.harvester'),
@@ -49,6 +50,7 @@ module.exports.loop = function () {
 
     sourceManager.ensureSourceCapacity(room);
     if (config.economy.autoBuild) buildPlanner.run(room);
+    if (config.economy.layoutPlanning) { layoutPlanner.run(room); layoutPlanner.buildRoads(room); }
     if (config.military.towerDefense) towerManager.run(room);
     spawnManager.run(room);
   }
