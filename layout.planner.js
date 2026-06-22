@@ -59,17 +59,25 @@ module.exports = {
   },
 
   /**
-   * 按缓存布局铺道路工地（RCL3+，每 100 tick 检查补建，低频省 CPU）。
-   * 道路让 creep 移动快一倍、省能量，是发育提速的关键基建。
+   * 按缓存布局铺道路工地。
+   * 哲学：只有当前 RCL 基建（extension）建完 + roadmap 该级允许修路，才开始铺路。
+   * （避免早期能量被修路分走拖慢 extension）
    */
   buildRoads(room) {
     if (!room.memory.layout || !room.memory.layout.done) return;
-    if (room.controller.level < 3) return;        // RCL3+ 才铺路（早期能量紧张）
-    if (Game.time % 100 !== 0) return;             // 每 100 tick 检查一次
+    const rcl = room.controller.level;
+    const roadmap = require('roadmap');
+    if (!roadmap.shouldBuildRoads(rcl)) return;   // 该级还不该修路（RCL<3）
+    // 基建闸门：这一级 extension 没建完就不修路，能量优先给 extension
+    try {
+      const infra = require('infra');
+      if (!infra.isComplete(room)) return;
+    } catch (e) { /* infra 不可用时不阻断 */ }
+    if (Game.time % 100 !== 0) return;
 
     let queued = 0;
     for (const r of room.memory.layout.roads) {
-      if (queued >= 5) break;                      // 一次最多排 5 段，避免工地堆积
+      if (queued >= 5) break;
       const pos = new RoomPosition(r.x, r.y, room.name);
       const hasRoad = pos.lookFor(LOOK_STRUCTURES).some((s) => s.structureType === STRUCTURE_ROAD);
       const hasSite = pos.lookFor(LOOK_CONSTRUCTION_SITES).some((s) => s.structureType === STRUCTURE_ROAD);

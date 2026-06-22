@@ -26,12 +26,15 @@ module.exports = {
     const profiler = require('cpu.profiler');
     const pathCache = require('path.cache');
     const statsTracker = require('stats.tracker');
+    const roadmap = require('roadmap');
 
     global.help = function (cat) {
       const G = (t) => `<div style="color:#4fc3f7;font-weight:bold;margin-top:5px">${t}</div>`;
       let body = `<div style="font-family:Consolas,monospace;font-size:12px;background:#1a1a1a;padding:8px 12px;border-radius:6px;border:1px solid #333;line-height:1.6">` +
         `<div style="color:#ffd54f;font-weight:bold;font-size:14px">🎮 控制台命令大全</div>`;
       body += G('📊 仪表盘 / 显示');
+      body += cmd('roadmap()', '一个月发育总路线图(RCL2→8)');
+      body += cmd('plan()', '当前 RCL 焦点任务');
       body += cmd('dash()', '打印中文图形仪表盘');
       body += cmd('hud(\'tr\')', 'HUD位置: tl/tr/bl/ctrl/mini/off');
       body += cmd('hud()', '一键显示/隐藏 HUD');
@@ -64,6 +67,21 @@ module.exports = {
     }
 
     global.dash = function () { dashboard.print(); return '✅ 仪表盘已刷新'; };
+
+    // 一个月发育总路线图
+    global.roadmap = function () {
+      const home = Object.keys(Game.rooms).find((r) => Game.rooms[r].controller && Game.rooms[r].controller.my);
+      const rcl = home ? Game.rooms[home].controller.level : 1;
+      console.log(roadmap.fullPlan(rcl));
+      return '👆 ✅=已过  ▶️=当前  ⬜=未来';
+    };
+    // 当前发育相位 + 焦点任务
+    global.plan = function () {
+      const home = Object.keys(Game.rooms).find((r) => Game.rooms[r].controller && Game.rooms[r].controller.my);
+      if (!home) return '⚠ 无主房';
+      const p = roadmap.phase(Game.rooms[home]);
+      return `🎯 RCL${p.rcl} 当前任务：${p.focus}` + (p.maxed ? ' 👑已满级' : ` → 下一级 RCL${p.nextLevel}`);
+    };
 
     // 房间 HUD 位置/显隐切换
     global.hud = function (pos) {

@@ -90,6 +90,14 @@ module.exports = {
     // ---- 完整版 ----
     push(`🏠 ${room.name}  RCL${c.level}  GCL${Game.gcl ? Game.gcl.level : '?'}`, '#ffd54f');
 
+    // 当前发育相位焦点（一月路线图）
+    try {
+      const roadmap = require('roadmap');
+      const ph = roadmap.phase(room);
+      const f = ph.focus.length > 22 ? ph.focus.slice(0, 22) + '…' : ph.focus;
+      push(`🎯 ${f}`, '#aed581');
+    } catch (e) { /* ignore */ }
+
     // 控制器 + 距下一级 ETA（分钟）
     let eta = '';
     if (c.level < 8 && rate > 0) {
