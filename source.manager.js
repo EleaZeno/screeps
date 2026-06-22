@@ -47,11 +47,11 @@ module.exports = {
     const room = creep.room;
     if (!room.memory.sources) this.ensureSourceCapacity(room);
 
-    // 统计每个 source 当前已绑定多少 harvester
+    // 统计每个 source 当前已绑定多少采集者（harvester / miner 均算）
     const assigned = {};
     for (const name in Game.creeps) {
       const c = Game.creeps[name];
-      if (c.memory.role === 'harvester' && c.memory.sourceId) {
+      if ((c.memory.role === 'harvester' || c.memory.role === 'miner') && c.memory.sourceId) {
         assigned[c.memory.sourceId] = (assigned[c.memory.sourceId] || 0) + 1;
       }
     }
@@ -81,5 +81,25 @@ module.exports = {
     let total = 0;
     for (const id in room.memory.sources) total += room.memory.sources[id];
     return total;
+  },
+
+  /**
+   * 静态采矿专用：为 miner 分配一个"还没 miner的 source"（每 source 只绑 1 个 miner）。
+   */
+  assignSourceForMiner(creep) {
+    const room = creep.room;
+    const minerOn = {};
+    for (const name in Game.creeps) {
+      const c = Game.creeps[name];
+      if (c.memory.role === 'miner' && c.memory.sourceId) minerOn[c.memory.sourceId] = true;
+    }
+    const sources = room.find(FIND_SOURCES);
+    for (const source of sources) {
+      if (!minerOn[source.id]) {
+        creep.memory.sourceId = source.id;
+        return source.id;
+      }
+    }
+    return null;
   },
 };

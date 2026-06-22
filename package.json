@@ -1,0 +1,10 @@
+{
+  "name": "screeps-v2",
+  "version": "2.0.0",
+  "description": "Clean low-CPU early-game Screeps script",
+  "private": true,
+  "devDependencies": {
+    "grunt": "^1.6.1",
+    "grunt-screeps": "^1.5.0"
+  }
+}
