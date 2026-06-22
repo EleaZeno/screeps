@@ -33,10 +33,13 @@ module.exports = {
     const n = (r) => counts[r] || 0;
 
     // ---- 紧急兜底：完全没有采集者，强出最小 harvester 防经济崩盘 ----
+    // 【自愈】绝境保护：若 creep 死光，能量够 200 出标准最小号；
+    // 不够但够 150 出 [WORK,MOVE] 极端求生号（能采能动）；spawn 每 tick 回血，不团灭总能攀出。
     const gatherers = n('harvester') + n('miner');
     if (gatherers === 0) {
-      this.spawnCreep(spawn, 'harvester', [WORK, CARRY, MOVE]);
-      return;
+      if (cur >= 200) this.spawnCreep(spawn, 'harvester', [WORK, CARRY, MOVE]);
+      else if (cur >= 150) this.spawnCreep(spawn, 'harvester', [WORK, MOVE]);
+      return; // 未出也 return，下 tick 继续（spawn 正回血）
     }
 
     // ---- 计算目标数量 ----
@@ -75,7 +78,7 @@ module.exports = {
       // 哲学：基建未完成时 upgrader 只留 1（防降级），能量全给 builder
       targets = [
         ['miner', numSources],
-        ['hauler', numSources * config.population.haulersPerSource],
+        ['hauler', this.haulerTarget(room, numSources)],
         ['builder', hasConstruction ? 4 : 0],
         ['upgrader', infraComplete ? this.upgraderTarget(room, rcl) : 1],
       ];
