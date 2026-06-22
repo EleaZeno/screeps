@@ -8,13 +8,17 @@
 
 module.exports = {
   /**
-   * 统一移动接口：用 reusePath 缓存路径，大幅降低寻路 CPU。
-   * 路径缓存由 Screeps 引擎托管，失效会自动重算，无需手动存 Memory。
+   * 统一移动接口：CPU 只算一次最优路径，之后多 tick 反复复用（不每 tick 重算）。
+   * 原理：Screeps 引擎的 moveTo 会把路径序列化存进 creep.memory._move，
+   * reusePath=N 表示这条路径复用 N tick 才重算一次。把 N 调大
+   * = “算一次、走很久”，完全符合你要的“隔一段算一次反复调用”。
+   * 静态采矿/固定往返场景路线不变，复用很长也不会错；被堵了引擎会自动让路。
    */
   moveTo(creep, target, color) {
     return creep.moveTo(target, {
-      reusePath: 8,                       // 缓存 8 tick 的路径
-      visualizePathStyle: { stroke: color || '#ffffff' },
+      reusePath: 30,                      // 算一次复用 30 tick（原来是 8）→ 寻路 CPU 降 ~75%
+      serializeMemory: true,              // 路径序列化存内存（紧凑，用闲置内存换 CPU）
+      visualizePathStyle: color ? { stroke: color, opacity: 0.15 } : undefined,
       ignoreCreeps: false,
     });
   },

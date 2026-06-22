@@ -116,12 +116,12 @@ module.exports = {
       if (!st) return '⚠ 数据不足（刚重启？再等几 tick）';
       console.log(
         `<div style="font-family:Consolas,monospace;font-size:12px;background:#1a1a1a;padding:8px 12px;border-radius:6px;border:1px solid #333;line-height:1.7">` +
-        `<div style="color:#4fc3f7;font-weight:bold">📈 ${rn} 过往 ${st.window} tick 统计</div>` +
+        `<div style="color:#4fc3f7;font-weight:bold">📈 ${rn} 过往 ${(st.window * 3.33 / 60).toFixed(1)} 分钟统计</div>` +
         `<div style="color:#aaa">　能量净流入　<b style="color:${st.eRate >= 0 ? '#4caf50' : '#f44336'}">${st.eRate >= 0 ? '+' : ''}${st.eRate}/tick</b></div>` +
         `<div style="color:#aaa">　控制器增长　<b style="color:#4fc3f7">+${st.cpRate}/tick</b></div>` +
         `<div style="color:#aaa">　CPU 平均/峰值 <b style="color:#ce93d8">${st.cpuAvg} / ${st.cpuMax}</b></div>` +
         `<div style="color:#aaa">　平均 creep 数 <b style="color:#ccc">${st.creepAvg}</b></div>` +
-        `<div style="color:#666;font-size:11px">　(采样 ${st.samples} 点)</div></div>`
+        `<div style="color:#666;font-size:11px">　(采样 ${st.samples} 点, 1 tick≈3.33秒)</div></div>`
       );
       return '✅';
     };

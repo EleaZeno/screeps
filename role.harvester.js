@@ -60,7 +60,7 @@ module.exports = {
         if (creep.pos.isNearTo(source)) {
           creep.harvest(source);
         } else {
-          creep.moveTo(slot.x, slot.y, { reusePath: 15, visualizePathStyle: { stroke: '#ffaa00' } });
+          creep.moveTo(slot.x, slot.y, { reusePath: 30, visualizePathStyle: { stroke: '#ffaa00', opacity: 0.15 } });
         }
       } else if (creep.harvest(source) === ERR_NOT_IN_RANGE) {
         utils.moveTo(creep, source, '#ffaa00');

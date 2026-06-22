@@ -90,12 +90,13 @@ module.exports = {
     // ---- 完整版 ----
     push(`🏠 ${room.name}  RCL${c.level}  GCL${Game.gcl ? Game.gcl.level : '?'}`, '#ffd54f');
 
-    // 控制器 + 距下一级 ETA
+    // 控制器 + 距下一级 ETA（分钟）
     let eta = '';
     if (c.level < 8 && rate > 0) {
       const remain = c.progressTotal - c.progress;
       const ticks = Math.ceil(remain / Math.max(rate, 0.1));
-      eta = ticks < 100000 ? ` ~${ticks > 9999 ? (ticks / 1000).toFixed(1) + 'k' : ticks}t` : '';
+      const mins = ticks * 3.33 / 60;
+      eta = mins < 1440 ? ` ~${mins < 60 ? mins.toFixed(0) + '分' : (mins / 60).toFixed(1) + '时'}` : ` ~${(mins / 1440).toFixed(1)}天`;
     }
     push(`控制 ${bar(ctrlPct)} ${(ctrlPct * 100).toFixed(1)}%${eta}`, '#4fc3f7');
 
@@ -134,11 +135,11 @@ module.exports = {
     // CPU + bucket
     push(`⚙ CPU ${Game.cpu.getUsed().toFixed(1)}/${Game.cpu.limit} bkt ${Game.cpu.bucket}`, '#ce93d8');
 
-    // 过往 N tick 平均统计（能量净流入 + 控制器增长）
+    // 过往 N tick 平均统计（能量净流入 + CPU，用分钟描述窗口）
     try {
       const tracker = require('stats.tracker');
       const st = tracker.compute(room.name);
-      if (st) push(`📈 ${st.window}t均: 能${st.eRate >= 0 ? '+' : ''}${st.eRate}/t CPU${st.cpuAvg}`, '#80cbc4');
+      if (st) push(`📈 近${(st.window * 3.33 / 60).toFixed(1)}分均: 能${st.eRate >= 0 ? '+' : ''}${st.eRate}/t CPU${st.cpuAvg}`, '#80cbc4');
     } catch (e) { /* ignore */ }
 
     // 威胁详情
