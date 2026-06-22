@@ -87,11 +87,30 @@ module.exports = {
       //   harvester 又不再补 → 卡死在「1 个采集者 + 能量封顶 500」，表现=「再也不造收获者」。
       //   修复：静态期也保留「最低采集者保底」——采集者(harvester+miner) < 2 时，
       //   先用「当前能量买得起的最大 harvester」把生产力垫起来，再谈高效 miner。
-      const _gatherersNow = n('harvester') + n('miner');
-      if (_gatherersNow < 2) {
-        const body = this.affordableHarvester(cur);
-        if (body) {
-          const res = this.spawnCreep(spawn, 'harvester', body);
+      //
+      //   【2026-06-23·二次加固·throughput 死锁】只补到 2 个还不够：2 个弱 harvester(如 W1+W2)
+      //   产能撑不起 ~600 能量的 miner，会在「2 采集者 + 能量永远到不了 600」二次卡死。
+      //   真正出口：在「还没有任何 miner」之前，持续用 transition 式 harvester-fill 经济
+      //   （按开采位数补 harvester），直到攒得出第一个 miner；miner 一旦诞生再切纯静态。
+      const _miners = n('miner');
+      const _harvesters = n('harvester');
+      if (_miners === 0) {
+        // 还没有 miner：先把 harvester 补到能填满开采位（含 oversub），用当前能量买得起的体型。
+        const _ecoOv = (Memory.config && Memory.config.economy) || {};
+        const _oversub = _ecoOv.harvesterOversub || config.economy.harvesterOversub || 1.3;
+        const _slots = scheduler.totalSlots(room) || spots || numSources;
+        const _harvNeed = Math.min(Math.max(2, Math.ceil(_slots * _oversub)), 12);
+        if (_harvesters < _harvNeed) {
+          const body = this.affordableHarvester(cur);
+          if (body) {
+            const res = this.spawnCreep(spawn, 'harvester', body);
+            if (res === OK || res === ERR_NOT_ENOUGH_ENERGY) return;
+          }
+        }
+        // harvester 已够：尝试攒/造第一个 miner（buildBody 自适应；钱不够就等）
+        if (n('miner') < numSources) {
+          const body = this.buildBody('miner', cap);
+          const res = this.spawnCreep(spawn, 'miner', body);
           if (res === OK || res === ERR_NOT_ENOUGH_ENERGY) return;
         }
       }
@@ -174,14 +193,24 @@ module.exports = {
   /** 经济身体：[WORK,CARRY,MOVE] 单元堆叠；hauler 用 [CARRY,MOVE]；miner 重 WORK */
   buildBody(role, energyCap) {
     if (role === 'miner') {
-      // miner 满 WORK 榨干 source：5 WORK + 1 CARRY + 3 MOVE 约 650 能量
-      const work = Math.min(5, Math.floor((energyCap - 100) / 100));
-      const body = [];
-      for (let i = 0; i < Math.max(2, work); i++) body.push(WORK);
-      body.push(CARRY);
-      const moves = Math.max(1, Math.ceil(body.length / 2));
-      for (let i = 0; i < moves; i++) body.push(MOVE);
-      return body;
+      // miner 满 WORK 榨干 source；【关键修复 2026-06-23】保证总成本 ≤ energyCap。
+      //   原 bug：work=floor((cap-100)/100) 算出的 body 可能超 cap（cap=550 → 4W+C+3M=600>550）
+      //   → miner 永远 ERR_NOT_ENOUGH_ENERGY 造不出 → 静态采矿永远启动不了。
+      //   修复：从 work 递减找到「总成本≤cap」的最大身体。
+      let work = Math.max(2, Math.min(5, Math.floor((energyCap - 100) / 100)));
+      let body;
+      for (; work >= 1; work--) {
+        const moves = Math.max(1, Math.ceil((work + 1) / 2)); // (work 个 WORK + 1 CARRY) 的一半
+        const cost = work * 100 + 50 + moves * 50;
+        if (cost <= energyCap) {
+          body = [];
+          for (let i = 0; i < work; i++) body.push(WORK);
+          body.push(CARRY);
+          for (let i = 0; i < moves; i++) body.push(MOVE);
+          break;
+        }
+      }
+      return body || [WORK, CARRY, MOVE];
     }
     if (role === 'hauler') {
       // 全 CARRY+MOVE：成对堆叠

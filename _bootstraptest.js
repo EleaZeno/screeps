@@ -74,5 +74,15 @@ function assert(cond, msg) { if (!cond) { console.log('❌ ' + msg); fail++; } e
   }
 })();
 
+// ---- 场景2：buildBody('miner') 成本必须 ≤ energyCap（根根因：原来 cap=550 算出 600 永远造不起）----
+(function () {
+  const cost = (b) => b.reduce((a, p) => a + ({ work: 100, carry: 50, move: 50 }[p] || 0), 0);
+  for (const cap of [300, 400, 550, 800, 1300]) {
+    const b = spawnManager.buildBody('miner', cap);
+    assert(cost(b) <= cap, `miner body 成本(${cost(b)}) 必须 ≤ cap(${cap})，否则永远造不起 [${b.length}部件]`);
+    assert(b.includes(CARRY) && b.includes(MOVE) && b.includes(WORK), `cap=${cap} miner 必须含 WORK+CARRY+MOVE`);
+  }
+})();
+
 console.log(fail === 0 ? '\n🎉 BOOTSTRAP 死锁复现/回归全部通过' : `\n💥 ${fail} 项失败`);
 process.exit(fail === 0 ? 0 : 1);
