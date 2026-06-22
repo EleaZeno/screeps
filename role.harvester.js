@@ -7,6 +7,10 @@
  *  - 满仓后用 utils 找最优回填目标（spawn>extension>tower>storage）
  *  - working 状态机：满了去送，空了回去采，减少抖动
  *  - 【防卡死】到不了专属格时不死磕，直接走向 source 本体采矿
+ *  - 【关键修复 2026-06-23】所有原地工作动作改用 utils.work()，成功即清零卡死计数，
+ *    根除“贴着 source/spawn 静止采矿被 guardian 误判焊死→suicide”的致命 bug。
+ *  - 【关键修复 2026-06-23】不再因 source.energy===0（采空再生间隙）就弃格回跑，
+ *    根除“走两步又折返”的抖动。
  */
 
 const sourceManager = require('source.manager');
@@ -39,80 +43,74 @@ module.exports = {
       // 送货
       const target = utils.findEnergyDropOff(creep);
       if (target) {
-        const r = creep.transfer(target, RESOURCE_ENERGY);
-        if (r === ERR_NOT_IN_RANGE) utils.moveTo(creep, target, '#ffffff');
-        else if (r === OK) utils.markBusy(creep); // 成功送货=干正事，不算卡
+        if (utils.work(creep, 'transfer', target, RESOURCE_ENERGY) === ERR_NOT_IN_RANGE) {
+          utils.moveTo(creep, target, '#ffffff');
+        }
       } else {
         // 所有存储都满了，能量溢出。发育哲学：基建未完成时，
         // 溢出能量优先去帮忙建造（而不是去升级 controller），把能量锁在建造上。
         const site = creep.pos.findClosestByRange(FIND_CONSTRUCTION_SITES);
         const infra = require('infra');
         if (site && !infra.isComplete(creep.room)) {
-          const r = creep.build(site);
-          if (r === ERR_NOT_IN_RANGE) utils.moveTo(creep, site, '#ffdd00');
-          else if (r === OK) utils.markBusy(creep);
+          if (utils.work(creep, 'build', site) === ERR_NOT_IN_RANGE) utils.moveTo(creep, site, '#ffdd00');
         } else {
           const ctrl = creep.room.controller;
-          if (ctrl) {
-            const r = creep.upgradeController(ctrl);
-            if (r === ERR_NOT_IN_RANGE) utils.moveTo(creep, ctrl, '#66ccff');
-            else if (r === OK) utils.markBusy(creep);
-          }
+          if (ctrl && utils.work(creep, 'upgradeController', ctrl) === ERR_NOT_IN_RANGE) utils.moveTo(creep, ctrl, '#66ccff');
         }
       }
     } else {
-      // 【免疫系统·求生优先】紧急模式下，先捍起身边最近的掘落能量/容器能量
+      // 【免疫系统·求生优先】紧急模式下，先捡起身边最近的掘落能量/容器能量
       // （比跑去远处 source 现采快得多），快速把能量运回 spawn 脱困。
-      // 可救命：死亡螺旋时地上常有上一波 creep 死后/溢出的能量在白白蒸发。
       const guardian = require('colony.guardian');
       if (guardian.isEmergency()) {
         const drop = creep.pos.findClosestByRange(FIND_DROPPED_RESOURCES, {
           filter: (rr) => rr.resourceType === RESOURCE_ENERGY && rr.amount >= 20,
         });
         if (drop) {
-          const r = creep.pickup(drop);
-          if (r === ERR_NOT_IN_RANGE) utils.moveTo(creep, drop, '#ff0000');
-          else if (r === OK) utils.markBusy(creep);
+          if (utils.work(creep, 'pickup', drop) === ERR_NOT_IN_RANGE) utils.moveTo(creep, drop, '#ff0000');
           return;
         }
         const cont = creep.pos.findClosestByRange(FIND_STRUCTURES, {
           filter: (s) => s.structureType === STRUCTURE_CONTAINER && s.store[RESOURCE_ENERGY] > 0,
         });
         if (cont) {
-          const r = creep.withdraw(cont, RESOURCE_ENERGY);
-          if (r === ERR_NOT_IN_RANGE) utils.moveTo(creep, cont, '#ff0000');
-          else if (r === OK) utils.markBusy(creep);
+          if (utils.work(creep, 'withdraw', cont, RESOURCE_ENERGY) === ERR_NOT_IN_RANGE) utils.moveTo(creep, cont, '#ff0000');
           return;
         }
         // 地上/容器都没现成能量 → 落到下方正常采矿逻辑
       }
+
       // 采集：分配专属开采格（调度器），走到那一格采 —— 根上消除抢位冲突
       if (!creep.memory.slot) {
         scheduler.assignSlot(creep);
       }
       const slot = creep.memory.slot;
       let source = creep.memory.sourceId ? Game.getObjectById(creep.memory.sourceId) : null;
-      // 绑定 source 没能量了，临时找一个有能量的活跃 source
-      if (!source || source.energy === 0) {
-        source = creep.pos.findClosestByRange(FIND_SOURCES_ACTIVE);
-        if (source) {
-          if (creep.harvest(source) === ERR_NOT_IN_RANGE) utils.moveTo(creep, source, '#ffaa00');
-          else utils.markBusy(creep);
+
+      // 【关键修复·消除“走两步回去”抖动】
+      // 原 bug：source.energy===0（被采空、正再生的间隙很常见）就立刻丢弃专属
+      // source 跑去最近活跃 source，下 tick 原 source 又有能量了再跑回来 → 往返横跳。
+      // 修复：只有绑定 source 彻底不存在(被移除)时才另寻；energy===0 时仍守在原 source
+      //       旁等再生（harvest 返回 NOT_ENOUGH_RESOURCES，无害），不抛弃专属格、不回跑。
+      if (!source) {
+        const alt = creep.pos.findClosestByRange(FIND_SOURCES_ACTIVE);
+        if (alt) {
+          if (utils.work(creep, 'harvest', alt) === ERR_NOT_IN_RANGE) utils.moveTo(creep, alt, '#ffaa00');
         }
         return;
       }
 
       // ——【防卡死核心修复】——
-      // 1. 只要已紧挨 source，不管有没有专属格，直接采（最高优先，立刻产出）
+      // 1. 只要已紧挨 source，直接采/原地等再生（最高优先，立刻产出）；
+      //    用 utils.work → 采到能量即清零卡死计数，杜绝静止采矿被 guardian 误杀。
       if (creep.pos.isNearTo(source)) {
-        creep.harvest(source);
-        utils.markBusy(creep); // 在采矿=干正事，不算卡
+        utils.work(creep, 'harvest', source);
         return;
       }
+
       // 2. 未挨到 source：默认走向 source 本体；
       //    若有专属格且该格“空着或就是自己占的”，才走向专属格；
-      //    若专属格被别人占了 → 放弃死磕，直接走向 source（之前 oversub>1 多出来的
-      //    creep 被分到已占格 → moveTo 走不过去 + reusePath 缓存死路 → 原地卡死）。
+      //    若专属格被别人占了 → 放弃死磕，直接走向 source（避免 moveTo 走不过去原地卡死）。
       let dest = source.pos;
       if (slot) {
         const occ = creep.room.lookForAt(LOOK_CREEPS, slot.x, slot.y)[0];

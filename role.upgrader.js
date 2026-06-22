@@ -4,6 +4,7 @@
  * role.upgrader.js — 升级者
  * ------------------------------------------------------------------
  * 专职升级 controller。空了去取能量（优先掉落/容器，再 source），满了回去升级。
+ * 【关键修复 2026-06-23】升级动作改用 utils.work()，原地升级成功即清零卡死计数防误杀。
  */
 
 const utils = require('utils');
@@ -29,7 +30,7 @@ module.exports = {
         if (ctrlContainer && creep.store.getFreeCapacity() > 0 && creep.pos.inRangeTo(ctrlContainer, 1)) {
           creep.withdraw(ctrlContainer, RESOURCE_ENERGY); // 边升级边补能量
         }
-        if (creep.upgradeController(ctrl) === ERR_NOT_IN_RANGE) {
+        if (utils.work(creep, 'upgradeController', ctrl) === ERR_NOT_IN_RANGE) {
           utils.moveTo(creep, ctrl, '#66ccff');
         }
       }

@@ -124,7 +124,7 @@ module.exports = {
       filter: (r) => r.resourceType === RESOURCE_ENERGY && r.amount > 50,
     });
     if (dropped) {
-      if (creep.pickup(dropped) === ERR_NOT_IN_RANGE) this.moveTo(creep, dropped, '#ffaa00');
+      if (this.work(creep, 'pickup', dropped) === ERR_NOT_IN_RANGE) this.moveTo(creep, dropped, '#ffaa00');
       return;
     }
 
@@ -134,13 +134,13 @@ module.exports = {
         s.store[RESOURCE_ENERGY] > 0,
     });
     if (store) {
-      if (creep.withdraw(store, RESOURCE_ENERGY) === ERR_NOT_IN_RANGE) this.moveTo(creep, store, '#ffaa00');
+      if (this.work(creep, 'withdraw', store, RESOURCE_ENERGY) === ERR_NOT_IN_RANGE) this.moveTo(creep, store, '#ffaa00');
       return;
     }
 
     const source = creep.pos.findClosestByRange(FIND_SOURCES_ACTIVE);
     if (source) {
-      if (creep.harvest(source) === ERR_NOT_IN_RANGE) this.moveTo(creep, source, '#ffaa00');
+      if (this.work(creep, 'harvest', source) === ERR_NOT_IN_RANGE) this.moveTo(creep, source, '#ffaa00');
     }
   },
 };

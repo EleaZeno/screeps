@@ -12,11 +12,16 @@ const config = require('config');
 const sourceManager = require('source.manager');
 const scheduler = require('source.scheduler');
 const infra = require('infra');
+const guardian = require('colony.guardian');
 
 module.exports = {
   run(room) {
     const spawn = room.find(FIND_MY_SPAWNS, { filter: (s) => !s.spawning })[0];
     if (!spawn) return;
+
+    // 【免疫系统优先】求生模式下，孵化完全交给 guardian，这里不插手。
+    // 避免 guardian 与 spawn.manager 两套逻辑抢 spawn / 反复回收打架。
+    if (guardian.isEmergency()) return;
 
     const rcl = room.controller.level;
     const cap = room.energyCapacityAvailable;
@@ -33,12 +38,11 @@ module.exports = {
     const n = (r) => counts[r] || 0;
 
     // ---- 紧急兜底：完全没有采集者，强出最小 harvester 防经济崩盘 ----
-    // 【自愈】绝境保护：若 creep 死光，能量够 200 出标准最小号；
-    // 不够但够 150 出 [WORK,MOVE] 极端求生号（能采能动）；spawn 每 tick 回血，不团灭总能攀出。
+    // 【自愈】绝境保护：若 creep 死光，能量够 200 出标准最小号。
+    // 【修复】永不出无 CARRY 的 [WORK,MOVE]（采了运不走=白采）；<200 等回血。
     const gatherers = n('harvester') + n('miner');
     if (gatherers === 0) {
       if (cur >= 200) this.spawnCreep(spawn, 'harvester', [WORK, CARRY, MOVE]);
-      else if (cur >= 150) this.spawnCreep(spawn, 'harvester', [WORK, MOVE]);
       return; // 未出也 return，下 tick 继续（spawn 正回血）
     }
 
@@ -226,6 +230,25 @@ module.exports = {
     if (cap < 500) return;
     if (Game.time % 10 !== 0) return; // 低频检查省 CPU
     const idealWork = this.harvesterWorkCount(cap); // 【M4】与 buildBody 同一公式
+
+    // 【关键修复 2026-06-23·防经济崩盘】
+    // 原 bug：求生模式强孵化的小 harvester（如 [WORK,CARRY,MOVE]，1 WORK）一旦 cap≥500
+    //   立刻被判“过时”→标记 recycle→跑回 spawn 拆解消失（表现=“新采集者走两步就回母体自杀”）。
+    //   若此时大号还没造出来，会反复回收→团灭→死亡螺旋。
+    // 修复门禁：① 现役采集者(harvester+miner)必须 >2 才允许回收（留够生产力，不动最后几个）；
+    //          ② 必须已存在至少 1 个“达标大号”(work>=idealWork-1) 才换，确保新陈代谢有接班人。
+    let gatherers = 0;
+    let hasBigReady = false;
+    for (const nm in Game.creeps) {
+      const cc = Game.creeps[nm];
+      if (cc.room.name !== room.name) continue;
+      if (cc.memory.role === 'harvester' || cc.memory.role === 'miner') {
+        gatherers++;
+        if (cc.getActiveBodyparts(WORK) >= idealWork - 1 && !cc.memory.recycle) hasBigReady = true;
+      }
+    }
+    if (gatherers <= 2 || !hasBigReady) return; // 生产力不足或无接班人 → 本周期不回收
+
     let marked = 0;
     for (const name in Game.creeps) {
       if (marked >= 1) break; // 每次最多换 1 个，平滑过渡
@@ -233,6 +256,8 @@ module.exports = {
       if (c.room.name !== room.name) continue;
       if (c.memory.role !== 'harvester') continue;
       if (c.memory.recycle) continue;
+      // 刚出生的幼体不回收（防 spawn→recycle 来回抖动）：ticksToLive 接近满值说明是新生
+      if (c.ticksToLive && c.ticksToLive > 1400) continue;
       const work = c.getActiveBodyparts(WORK);
       // 现役号比理想号小一半以上 → 过时，标记回收（idealWork-2 确保不会刚换就被判过时）
       if (work > 0 && work <= idealWork - 2) {
