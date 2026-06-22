@@ -99,5 +99,16 @@ function assert(cond, msg) { if (!cond) { console.log('❌ ' + msg); fail++; } e
   }
 })();
 
+// ---- 场景4：低能量下高优先角色买不起时，用缩小体上，不阻塞（防优先级死锁）----
+(function () {
+  // bodyCost 与 affordable 缩小：cur=200 时 hauler 应能出个 200 能量的 [C,M]×2
+  const small = spawnManager.buildBody('hauler', 200);
+  assert(spawnManager.bodyCost(small) <= 200, `cur=200 可造出≤200 的 hauler (实际成本 ${spawnManager.bodyCost(small)})`);
+  assert(small.includes(CARRY) && small.includes(MOVE), `缩小 hauler 含 CARRY+MOVE`);
+  // bodyCost 基本正确性
+  assert(spawnManager.bodyCost([WORK, CARRY, MOVE]) === 200, `bodyCost([W,C,M])=200`);
+  assert(spawnManager.bodyCost([CARRY, MOVE, CARRY, MOVE]) === 200, `bodyCost(2x[C,M])=200`);
+})();
+
 console.log(fail === 0 ? '\n🎉 BOOTSTRAP 死锁复现/回归全部通过' : `\n💥 ${fail} 项失败`);
 process.exit(fail === 0 ? 0 : 1);

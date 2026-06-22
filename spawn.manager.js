@@ -166,12 +166,21 @@ module.exports = {
     }
 
     // 按优先级孵化第一个缺额角色
+    // 【关键修复 2026-06-23·防优先级阻塞死锁】
+    //   原 bug：body 按 cap 造，能量不够就 return → 一个买不起的高优先角色(如 500 能量 hauler)
+    //   会永远阻住后面所有角色（upgrader 永不孵化）。而 hauler 买不起又因为没人运能量→能量上不去→循环。
+    //   修复：若 cap 体买不起，改用「当前能量买得起的缩小体」先出（仍足额的角色除外），
+      //   让经济先跑起来；只有连最小可用体都买不起时才等。
     for (const [role, target] of targets) {
       if (n(role) < target) {
-        const body = this.buildBody(role, cap);
+        let body = this.buildBody(role, cap);
+        if (this.bodyCost(body) > cur) {
+          const small = this.buildBody(role, Math.max(cur, 200)); // 用当前能量重算一个缩小体
+          if (this.bodyCost(small) <= cur) body = small;
+        }
         const res = this.spawnCreep(spawn, role, body);
         if (res === OK) return;
-        if (res === ERR_NOT_ENOUGH_ENERGY) return; // 等攒够能量
+        if (res === ERR_NOT_ENOUGH_ENERGY) return; // 连缩小体都买不起 → 等攻够能量
       }
     }
 
@@ -203,6 +212,12 @@ module.exports = {
       if (rcl >= 3 && rcl < 8) base += 2;
     }
     return base;
+  },
+
+  /** 身体能量成本（WORK100/CARRY50/MOVE50/ATTACK80/RANGED150/HEAL250/TOUGH10/CLAIM600） */
+  bodyCost(body) {
+    const C = { work: 100, carry: 50, move: 50, attack: 80, ranged_attack: 150, heal: 250, tough: 10, claim: 600 };
+    return (body || []).reduce((a, p) => a + (C[p] || 0), 0);
   },
 
   /** 经济身体：[WORK,CARRY,MOVE] 单元堆叠；hauler 用 [CARRY,MOVE]；miner 重 WORK */
