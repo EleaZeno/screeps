@@ -39,19 +39,25 @@ module.exports = {
       // 送货
       const target = utils.findEnergyDropOff(creep);
       if (target) {
-        if (creep.transfer(target, RESOURCE_ENERGY) === ERR_NOT_IN_RANGE) {
-          utils.moveTo(creep, target, '#ffffff');
-        }
+        const r = creep.transfer(target, RESOURCE_ENERGY);
+        if (r === ERR_NOT_IN_RANGE) utils.moveTo(creep, target, '#ffffff');
+        else if (r === OK) utils.markBusy(creep); // 成功送货=干正事，不算卡
       } else {
         // 所有存储都满了，能量溢出。发育哲学：基建未完成时，
         // 溢出能量优先去帮忙建造（而不是去升级 controller），把能量锁在建造上。
         const site = creep.pos.findClosestByRange(FIND_CONSTRUCTION_SITES);
         const infra = require('infra');
         if (site && !infra.isComplete(creep.room)) {
-          if (creep.build(site) === ERR_NOT_IN_RANGE) utils.moveTo(creep, site, '#ffdd00');
+          const r = creep.build(site);
+          if (r === ERR_NOT_IN_RANGE) utils.moveTo(creep, site, '#ffdd00');
+          else if (r === OK) utils.markBusy(creep);
         } else {
           const ctrl = creep.room.controller;
-          if (ctrl && creep.upgradeController(ctrl) === ERR_NOT_IN_RANGE) utils.moveTo(creep, ctrl, '#66ccff');
+          if (ctrl) {
+            const r = creep.upgradeController(ctrl);
+            if (r === ERR_NOT_IN_RANGE) utils.moveTo(creep, ctrl, '#66ccff');
+            else if (r === OK) utils.markBusy(creep);
+          }
         }
       }
     } else {
@@ -64,14 +70,18 @@ module.exports = {
           filter: (rr) => rr.resourceType === RESOURCE_ENERGY && rr.amount >= 20,
         });
         if (drop) {
-          if (creep.pickup(drop) === ERR_NOT_IN_RANGE) utils.moveTo(creep, drop, '#ff0000');
+          const r = creep.pickup(drop);
+          if (r === ERR_NOT_IN_RANGE) utils.moveTo(creep, drop, '#ff0000');
+          else if (r === OK) utils.markBusy(creep);
           return;
         }
         const cont = creep.pos.findClosestByRange(FIND_STRUCTURES, {
           filter: (s) => s.structureType === STRUCTURE_CONTAINER && s.store[RESOURCE_ENERGY] > 0,
         });
         if (cont) {
-          if (creep.withdraw(cont, RESOURCE_ENERGY) === ERR_NOT_IN_RANGE) utils.moveTo(creep, cont, '#ff0000');
+          const r = creep.withdraw(cont, RESOURCE_ENERGY);
+          if (r === ERR_NOT_IN_RANGE) utils.moveTo(creep, cont, '#ff0000');
+          else if (r === OK) utils.markBusy(creep);
           return;
         }
         // 地上/容器都没现成能量 → 落到下方正常采矿逻辑
@@ -87,6 +97,7 @@ module.exports = {
         source = creep.pos.findClosestByRange(FIND_SOURCES_ACTIVE);
         if (source) {
           if (creep.harvest(source) === ERR_NOT_IN_RANGE) utils.moveTo(creep, source, '#ffaa00');
+          else utils.markBusy(creep);
         }
         return;
       }
@@ -95,6 +106,7 @@ module.exports = {
       // 1. 只要已紧挨 source，不管有没有专属格，直接采（最高优先，立刻产出）
       if (creep.pos.isNearTo(source)) {
         creep.harvest(source);
+        utils.markBusy(creep); // 在采矿=干正事，不算卡
         return;
       }
       // 2. 未挨到 source：默认走向 source 本体；

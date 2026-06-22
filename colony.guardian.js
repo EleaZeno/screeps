@@ -20,7 +20,7 @@
  */
 
 const EMERGENCY_ENERGY_FLOOR = 200; // 低于此且无采集者 → 死亡螺旋
-const STUCK_KILL_THRESHOLD = 60;    // creep 卡死超过此 tick → 回收（兜最后一道）
+const STUCK_KILL_THRESHOLD = 150;   // creep 真正焊死超过此 tick 才回收（阈值拉高防误杀）
 const CTRL_DOWNGRADE_GUARD = 3000;  // controller 剩余降级时间低于此 → 拉响警报
 
 module.exports = {
@@ -137,10 +137,18 @@ module.exports = {
     for (const name in Game.creeps) {
       const c = Game.creeps[name];
       if (c.room.name !== room.name) continue;
-      if ((c.memory._stk || 0) >= STUCK_KILL_THRESHOLD) {
-        console.log(`🛡️ [GUARDIAN] 回收焊死 creep ${name} (卡 ${c.memory._stk} tick)`);
-        c.suicide();
+      const stk = c.memory._stk || 0;
+      if (stk < STUCK_KILL_THRESHOLD) continue;
+      if (c.memory._busy === Game.time) continue; // 本 tick 在干活，不杀
+      // 【严格防误杀】紧贴 spawn/source 的静止=正常采矿/送货，不杀，只清零
+      const nearSpawn = c.pos.findInRange(FIND_MY_SPAWNS, 1).length > 0;
+      const nearSource = c.pos.findInRange(FIND_SOURCES, 1).length > 0;
+      if (nearSpawn || nearSource) {
+        c.memory._stk = 0;
+        continue;
       }
+      console.log(`🛡️ [GUARDIAN] 回收真焊死 creep ${name} (卡 ${stk} tick 于空地 ${c.pos.x},${c.pos.y})`);
+      c.suicide();
     }
   },
 

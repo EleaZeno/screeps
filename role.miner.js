@@ -27,6 +27,7 @@ module.exports = {
         utils.moveTo(creep, container, '#ffaa00');
       } else {
         creep.harvest(source);
+        utils.markBusy(creep);
       }
     } else {
       // 还没 container：就近采，能量先掉地上（hauler 会来捡）

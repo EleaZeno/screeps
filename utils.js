@@ -8,6 +8,34 @@
 
 module.exports = {
   /**
+   * 标记 creep 本 tick 干了正事（采矿/送货/取能/建造/升级）。
+   * 被标记后，moveTo 的卡死检测不会把“静止干活”误判为焦死。
+   * 任何角色成功执行一个工作动作后都应调用。
+   * 【关键修复】同时把卡死计数 _stk 清零——原 bug：creep 贴着 source/container
+   * 静止采矿时根本不走 moveTo，_stk 永不重置，会一路累加到 60 被 guardian 误杀。
+   */
+  markBusy(creep) {
+    creep.memory._busy = Game.time;
+    creep.memory._stk = 0;
+  },
+
+  /**
+   * 工作动作统一封装：执行一个原地工作意图（harvest/transfer/withdraw/build/
+   * repair/upgradeController/pickup），返回原始返回码。
+   *  - 成功(OK) → markBusy（清零卡死计数，防止静止干活被误杀）
+   *  - ERR_NOT_IN_RANGE → 调用方负责 moveTo 过去（不算“卡”，因为正在赶路）
+   * 用法：const r = utils.work(creep, 'harvest', source); if (r===ERR_NOT_IN_RANGE) utils.moveTo(...)
+   */
+  work(creep, method, target, resourceType) {
+    const res =
+      resourceType !== undefined
+        ? creep[method](target, resourceType)
+        : creep[method](target);
+    if (res === OK) this.markBusy(creep);
+    return res;
+  },
+
+  /**
    * 统一移动接口：CPU 只算一次最优路径复用，+ 防堵塞三级决策。
    * 防堵逻辑（修复版）：检测原地卡顿几 tick 后，CPU 三选一里升级：
    *   ≤1 tick 原地未动：正常（可能刚好会合/疲劳），不管
@@ -18,8 +46,17 @@ module.exports = {
   moveTo(creep, target, color) {
     const m = creep.memory;
     // 卡顿检测：与上一 tick 位置相同 → stuck 计数，不同 → 清零
-    if (m._mx === creep.pos.x && m._my === creep.pos.y) m._stk = (m._stk || 0) + 1;
-    else m._stk = 0;
+    // 【关键修复】只有本 tick “没干正事又没动”才算卡。若 creep 本 tick 已成功
+    // 执行过工作动作（采矿/送货/取能/建造/升级=设了 m._busy=Game.time），则不算卡。
+    // 这防住了“贴着 spawn/source 静止干活”被误判为焦死→被 guardian 误杀的致命 bug。
+    const busyThisTick = m._busy === Game.time;
+    if (busyThisTick) {
+      m._stk = 0;
+    } else if (m._mx === creep.pos.x && m._my === creep.pos.y) {
+      m._stk = (m._stk || 0) + 1;
+    } else {
+      m._stk = 0;
+    }
     m._mx = creep.pos.x; m._my = creep.pos.y;
 
     const stk = m._stk || 0;
