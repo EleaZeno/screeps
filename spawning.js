@@ -76,9 +76,9 @@ module.exports = {
 
   /** 矿工体：尽量多 WORK（榨干 source），1 CARRY，少量 MOVE。成本≤cap */
   _minerBody(cap) {
-    let work = Math.max(1, Math.min(6, Math.floor((cap - 100) / 100)));
+    let work = Math.min(5, Math.max(1, Math.floor((cap - 100) / 100))); // 5 WORK=10e/tick=source上限,超过浪费
     for (; work >= 1; work--) {
-      const moves = Math.max(1, Math.ceil((work + 1) / 2));
+      const moves = Math.max(1, Math.ceil(work / 3)); // 静态矿工不需跑快,少MOVE走到位即可
       const cost = work * 100 + 50 + moves * 50;
       if (cost <= cap) {
         const b = [];

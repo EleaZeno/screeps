@@ -16,6 +16,8 @@ const FILES = [
   'brain.js', 'blackboard.js', 'market.js', 'utility.js',
   'executor.js', 'spawning.js', 'planner.js', 'adaptive.js',
   'utils.js', 'source.scheduler.js',
+  // 世界模型（大脑对游戏物理规则的理解）
+  'worldmodel.js',
   // 工程规划层（基建+路网自动规划）
   'build.planner.js', 'layout.planner.js', 'roadmap.js', 'infra.js',
 ];

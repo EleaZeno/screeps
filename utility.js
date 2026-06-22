@@ -34,28 +34,25 @@ module.exports = {
     return value * fit * prox * cont * ener;
   },
 
-  /** 身体胜任度：creep 的部件是否适合这个任务 [0..1] */
+  /** 身体胜任度 [0..1] —— 【世界模型升级】
+   * 不再是启发式 WORK/5，而是用 worldmodel 算出该 creep 做该任务的【真实吞吐率】，
+   * 归一化到 [0..1]。这让大脑理解"重 WORK 去静采、重 CARRY 去搬运"是因为那确实吞吐最高
+   * （涵义涵现），而非因为写了规则。fitness=0 仅在物理上不胜任。 */
   fitness(creep, task) {
-    const body = creep.body;
-    const work = body.filter((p) => p.type === WORK).length;
-    const carry = body.filter((p) => p.type === CARRY).length;
-    const attack = body.filter((p) => p.type === ATTACK || p.type === RANGED_ATTACK).length;
+    const wm = require('worldmodel');
+    const p = wm.parts(creep);
     switch (task.type) {
-      case 'harvest':
-        return work > 0 ? Math.min(1, work / 5) : 0; // WORK 越多越胜任，满 5 WORK 封顶
-      case 'haul':
-        return carry > 0 ? Math.min(1, carry / 6) : 0; // 纯搬运看 CARRY
-      case 'fill':
-        return carry > 0 ? Math.min(1, carry / 4) : 0;
-      case 'upgrade':
-      case 'build':
-      case 'repair':
-        return work > 0 && carry > 0 ? Math.min(1, (work + carry) / 8) : 0; // 既要 WORK 也要 CARRY
-      case 'defend':
-        return attack > 0 ? Math.min(1, attack / 4) : 0.05; // 无攻击部件几乎不胜任（但非0，紧急时肉盾）
-      default:
-        return 0.5;
+      case 'harvest': if (p.work === 0) return 0; break;
+      case 'haul': if (p.carry === 0) return 0; break;
+      case 'fill': if (p.carry === 0) return 0; break;
+      case 'upgrade': case 'build': case 'repair': if (p.work === 0 || p.carry === 0) return 0; break;
+      case 'defend': return (p.attack + p.ranged) > 0 ? Math.min(1, (p.attack + p.ranged) / 4) : 0.05;
+      default: return 0.5;
     }
+    const tp = wm.taskThroughput(creep, task, 5);
+    const CAP = { harvest: wm.SOURCE_REGEN_RATE, haul: 12, fill: 12, upgrade: 8, build: 25, repair: 25 };
+    const cap = CAP[task.type] || 10;
+    return Math.max(0.05, Math.min(1, tp / cap));
   },
 
   /** 距离衰减：越近效用越高。1/(1+dist*k) */
