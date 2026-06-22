@@ -76,7 +76,7 @@ module.exports = {
       const slots = scheduler.totalSlots(room) || spots;
       const harvFill = Math.min(
         Math.ceil(slots * (config.economy.harvesterOversub || 1.4)),
-        12 // 硬上限，避免 spawn 队列堵死/CPU 浪费
+        16 // 硬上限（从12提到16）：多架采集者并行榚干source，避免队列堵死
       ); // 超额订阅：开采格×oversub（总有人在送货路上，多出的轮替补位）
       // 能量紧张期（cap<500 且有 extension 工地）：集中火力建 extension，
       // 暂停 upgrader（只靠 builder 建完后顺手升级），避免能量被升级分走。
