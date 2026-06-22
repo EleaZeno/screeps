@@ -33,10 +33,17 @@ module.exports = {
           utils.moveTo(creep, target, '#ffffff');
         }
       } else {
-        // 所有存储都满了，去帮忙升级 controller，别站着浪费
-        const ctrl = creep.room.controller;
-        if (ctrl && creep.upgradeController(ctrl) === ERR_NOT_IN_RANGE) {
-          utils.moveTo(creep, ctrl, '#66ccff');
+        // 所有存储都满了，能量溢出。发育哲学：基建未完成时，
+        // 溢出能量优先去帮忙建造（而不是去升级 controller），把能量锁在建设上。
+        const site = creep.pos.findClosestByRange(FIND_CONSTRUCTION_SITES);
+        const infra = require('infra');
+        if (site && !infra.isComplete(creep.room)) {
+          // 基建未完成 + 有工地 → 去建造
+          if (creep.build(site) === ERR_NOT_IN_RANGE) utils.moveTo(creep, site, '#ffdd00');
+        } else {
+          // 基建已完成（或无工地）：才去升级 controller，别站着浪费
+          const ctrl = creep.room.controller;
+          if (ctrl && creep.upgradeController(ctrl) === ERR_NOT_IN_RANGE) utils.moveTo(creep, ctrl, '#66ccff');
         }
       }
     } else {
