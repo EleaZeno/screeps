@@ -16,6 +16,7 @@
  *   Memory.config = { attack: { enabled: true, targetRoom: 'E5N53', squadSize: 4, type: 'melee' } }
  */
 const config = require('config');
+const guardian = require('colony.guardian');
 const spawnManager = require('spawn.manager');
 const sourceManager = require('source.manager');
 const scheduler = require('source.scheduler');
@@ -61,9 +62,14 @@ module.exports.loop = function () {
     const room = Game.rooms[roomName];
     if (!room.controller || !room.controller.my) continue;
 
+    // 【免疫系统】最高优先：先守护生存不变量（死亡螺旋熔断/死锁回收）。
+    // 返回 true 表示处于紧急接管，spawn/builder 等模块会读 guardian.isEmergency() 让路。
+    const emergency = profiler.wrap('guard', () => guardian.run(room));
+
     sourceManager.ensureSourceCapacity(room);
     profiler.wrap('sched', () => scheduler.planSlots(room)); // 空闲 CPU 预计算开采格+路线（只算一次，缓存）
-    if (config.economy.autoBuild) profiler.wrap('build', () => buildPlanner.run(room));
+    // 紧急求生模式下暂停一切非生存性建造，能量全留给采集/孵化
+    if (config.economy.autoBuild && !emergency) profiler.wrap('build', () => buildPlanner.run(room));
     if (config.economy.layoutPlanning) profiler.wrap('layout', () => { layoutPlanner.run(room); layoutPlanner.buildRoads(room); });
     if (config.military.towerDefense) profiler.wrap('tower', () => towerManager.run(room));
     profiler.wrap('spawn', () => spawnManager.run(room));

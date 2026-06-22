@@ -10,9 +10,23 @@
  */
 
 const utils = require('utils');
+const guardian = require('colony.guardian');
 
 module.exports = {
   run(creep) {
+    // 【免疫系统】求生模式：停止建造，把能量送回 spawn 救孵化
+    if (guardian.isEmergency()) {
+      if (creep.store[RESOURCE_ENERGY] > 0) {
+        const sp = creep.pos.findClosestByRange(FIND_MY_SPAWNS);
+        if (sp && sp.store.getFreeCapacity(RESOURCE_ENERGY) > 0) {
+          if (creep.transfer(sp, RESOURCE_ENERGY) === ERR_NOT_IN_RANGE) utils.moveTo(creep, sp, '#ff0000');
+          return;
+        }
+      } else {
+        utils.gatherEnergy(creep);
+        return;
+      }
+    }
     if (creep.memory.working && creep.store[RESOURCE_ENERGY] === 0) {
       creep.memory.working = false;
       creep.say('🔄');
