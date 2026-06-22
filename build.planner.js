@@ -53,6 +53,17 @@ module.exports = {
           this.placeAround(room, source.pos, STRUCTURE_CONTAINER, 1, 1);
         }
       }
+      // controller 旁也建一个 container（让 upgrader 静态站着升级，效率翻倍）
+      const ctrl = room.controller;
+      const ctrlNear = ctrl.pos.findInRange(FIND_STRUCTURES, 2, {
+        filter: (s) => s.structureType === STRUCTURE_CONTAINER,
+      });
+      const ctrlNearSites = ctrl.pos.findInRange(FIND_CONSTRUCTION_SITES, 2, {
+        filter: (s) => s.structureType === STRUCTURE_CONTAINER,
+      });
+      if (ctrlNear.length === 0 && ctrlNearSites.length === 0) {
+        this.placeAround(room, ctrl.pos, STRUCTURE_CONTAINER, 1, 2);
+      }
     }
   },
 

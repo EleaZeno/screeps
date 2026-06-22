@@ -51,21 +51,24 @@ module.exports = {
     }
 
     let targets;
+    // 突击基建模式：RCL≤3 且有工地时，多 builder 少 upgrader，能量优先填 extension 打破死循环
+    const rushInfra = config.economy.rushInfra && rcl <= 3 && hasConstruction;
+
     if (useStatic) {
       // 静态采矿模式：每 source 1 miner + N hauler
       targets = [
         ['miner', numSources],
         ['hauler', numSources * config.population.haulersPerSource],
-        ['upgrader', this.upgraderTarget(room, rcl)],
-        ['builder', hasConstruction ? config.population.buildersWithSites : 0],
+        ['builder', hasConstruction ? (rushInfra ? 3 : config.population.buildersWithSites) : 0],
+        ['upgrader', rushInfra ? 1 : this.upgraderTarget(room, rcl)],
       ];
     } else {
       // 早期 harvester 模式（RCL1）
       const spots = sourceManager.totalMiningSpots(room);
       targets = [
         ['harvester', Math.min(spots, rcl <= 1 ? 4 : spots)],
-        ['upgrader', this.upgraderTarget(room, rcl)],
-        ['builder', hasConstruction ? config.population.buildersWithSites : 0],
+        ['builder', hasConstruction ? (rushInfra ? 3 : config.population.buildersWithSites) : 0],
+        ['upgrader', rushInfra ? 1 : this.upgraderTarget(room, rcl)],
       ];
     }
 

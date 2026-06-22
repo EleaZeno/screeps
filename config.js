@@ -13,6 +13,7 @@ module.exports = {
     aggressiveUpgrade: true,   // 能量富余时狂堆 upgrader 冲 RCL
     autoBuild: true,           // 自动规划建造 extension/container/road/tower
     autoPixel: true,           // bucket 满 10000 时自动生成 pixel（闲置 CPU 变现）
+    rushInfra: true,           // RCL≤3 且有工地时，优先突击建 extension（打破低RCL死循环，加速发育）
   },
 
   // ---- 军事：防御常开，进攻默认关 ----
