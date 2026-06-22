@@ -26,7 +26,6 @@ const cpuManager = require('cpu.manager');
 const layoutPlanner = require('layout.planner');
 const intelManager = require('intel.manager');
 const profiler = require('cpu.profiler');
-const pathCache = require('path.cache');
 const dashboard = require('dashboard');
 const commands = require('commands');
 const visual = require('visual');
@@ -44,7 +43,6 @@ const ROLES = {
 
 module.exports.loop = function () {
   profiler.init(config.profiler !== false);
-  pathCache.init();
   if (!global.__cmdRegistered) { commands.register(); global.__cmdRegistered = true; } // 【M1】只注册一次，不每 tick 重挂
   const _t0 = profiler.start();
 
@@ -89,7 +87,10 @@ module.exports.loop = function () {
   profiler.end('creeps', _tc);
 
   // 4. 闲置 CPU 变现：bucket 满时自动生成 pixel（全局每 tick 检查一次）
-  if (config.economy.autoPixel) profiler.wrap('pixel', () => cpuManager.run());
+  // 控制台 pixelOn()/pixelOff() 写 Memory.config.economy.autoPixel，优先于静态 config。
+  const _ecoOv = (Memory.config && Memory.config.economy) || {};
+  const _autoPixel = _ecoOv.autoPixel !== undefined ? _ecoOv.autoPixel : config.economy.autoPixel;
+  if (_autoPixel) profiler.wrap('pixel', () => cpuManager.run());
 
   // 4b. 闲置 CPU/内存全面利用：预计算情报/威胁/扩张预案/距离矩阵（严格 bucket 门控，多房自动覆盖）
   if (config.economy.intelPlanning) profiler.wrap('intel', () => intelManager.run(config.economy.intelReserveBucket));

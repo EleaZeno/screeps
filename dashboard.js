@@ -14,7 +14,6 @@
  */
 
 const profiler = require('cpu.profiler');
-const pathCache = require('path.cache');
 
 // 画一条 HTML 进度条
 function bar(pct, color, width) {
@@ -94,11 +93,6 @@ module.exports = {
       }
     }
 
-    // 路径缓存
-    const pc = pathCache.stats();
-    const hrColor = pc.hitRate >= 50 ? '#4caf50' : (pc.hitRate > 0 ? '#ffc107' : '#666');
-    out.push(`<div style="color:#aaa;margin-top:3px">🗺 路径缓存 <span style="color:${hrColor}">命中率 ${pc.hitRate}%</span> <span style="color:#666">(${pc.hits}命中/${pc.misses}未命中, 共${pc.entries}条)</span></div>`);
-
     // 扩张提示
     const exp = Memory.intel && Memory.intel.tasks && Memory.intel.tasks.expansion;
     if (exp) {
@@ -148,8 +142,6 @@ module.exports = {
       const LBL = { creeps: 'creep逻辑', spawn: '孵化', intel: '情报', build: '建造', layout: '路网', tower: '塔', sched: '排程', pixel: '像素', visual: '可视化' };
       L.push(`🔥 热点: ` + keys.map((k) => `${LBL[k] || k}=${avg[k]}`).join('  '));
     }
-    const pc = pathCache.stats();
-    L.push(`🗺 路径缓存 命中率${pc.hitRate}% (${pc.hits}/${pc.hits + pc.misses}, ${pc.entries}条)`);
     console.log(L.join('\n'));
   },
 };

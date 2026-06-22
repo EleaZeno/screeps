@@ -89,8 +89,11 @@ module.exports = {
     } else if (rcl >= 2) {
       // 过渡发育期（RCL2 但 extension 没建完，cap<500）：填满开采位最大化进账。
       const slots = scheduler.totalSlots(room) || spots;
+      // 控制台 setOversub() 写 Memory.config.economy.harvesterOversub，优先于静态 config。
+      const _ecoOv = (Memory.config && Memory.config.economy) || {};
+      const _oversub = _ecoOv.harvesterOversub || config.economy.harvesterOversub || 1.4;
       const harvFill = Math.min(
-        Math.ceil(slots * (config.economy.harvesterOversub || 1.4)),
+        Math.ceil(slots * _oversub),
         16
       );
       // 哲学：基建未完成 → 专心干一件事（填满采集位 + 多 builder 建 extension），
@@ -256,8 +259,11 @@ module.exports = {
       if (c.room.name !== room.name) continue;
       if (c.memory.role !== 'harvester') continue;
       if (c.memory.recycle) continue;
-      // 刚出生的幼体不回收（防 spawn→recycle 来回抖动）：ticksToLive 接近满值说明是新生
-      if (c.ticksToLive && c.ticksToLive > 1400) continue;
+      // 【关键修复 2026-06-23·新生不回收】刚出生/仍在孵化的幼体不回收，防 spawn→recycle 来回抖动。
+      //   原 bug：孵化中 / 刚出生的 creep 其 ticksToLive === undefined，原判据 `c.ticksToLive && c.ticksToLive > 1400`
+      //   对 undefined 为假 → 门禄失效 → 新生小号被立即标记 recycle → “生成后没走两步就跑回母体消失”。
+      //   修复：undefined(孵化中) 或 ticksToLive>1400(刚生) 都视为新生，一律跳过。
+      if (c.spawning || c.ticksToLive === undefined || c.ticksToLive > 1400) continue;
       const work = c.getActiveBodyparts(WORK);
       // 现役号比理想号小一半以上 → 过时，标记回收（idealWork-2 确保不会刚换就被判过时）
       if (work > 0 && work <= idealWork - 2) {

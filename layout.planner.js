@@ -35,15 +35,7 @@ module.exports = {
       const ret = PathFinder.search(
         spawn.pos,
         { pos: targetPos, range: 1 },
-        {
-          plainCost: 2,
-          swampCost: 5,
-          maxOps: 4000,
-          roomCallback(roomName) {
-            const cm = new PathFinder.CostMatrix();
-            return cm;
-          },
-        }
+        { plainCost: 2, swampCost: 5, maxOps: 4000 }
       );
       for (const step of ret.path) {
         const key = `${step.x},${step.y}`;

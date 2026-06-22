@@ -10,10 +10,8 @@
  *   help()              — 列出所有命令
  *   dash()              — 立即打印一次中文图形仪表盘
  *   prof()              — 打印 CPU 热点排行
- *   paths()             — 路径缓存命中率
  *   intel()             — 情报/威胁/扩张快照
  *   resetProf()         — 清空 profiler 统计重新采样
- *   resetPaths()        — 清空路径缓存
  *   attack('E5N53', 4)  — 开启进攻：目标房 + 小队规模
  *   stopAttack()        — 关闭进攻
  *   setOversub(2.0)     — 调采集者超额订阅系数
@@ -24,7 +22,6 @@ module.exports = {
   register() {
     const dashboard = require('dashboard');
     const profiler = require('cpu.profiler');
-    const pathCache = require('path.cache');
     const statsTracker = require('stats.tracker');
     const roadmap = require('roadmap');
 
@@ -43,7 +40,6 @@ module.exports = {
       body += cmd('stats()', '过往100tick平均统计(能量流入/CPU/人口)');
       body += cmd('eta()', '预测距下一级RCL/GCL还要多久');
       body += cmd('prof()', 'CPU 热点排行');
-      body += cmd('paths()', '路径缓存命中率');
       body += cmd('intel()', '情报/威胁/扩张快照');
       body += G('🗺 侦察 / 房间');
       body += cmd('neighbors()', '扫描四邻房间所有者+等级');
@@ -56,7 +52,7 @@ module.exports = {
       body += cmd('pixelOn()/pixelOff()', '开关自动生成 pixel');
       body += cmd('say(\'name\',\'文字\')', '让某 creep 说话(调试/好玩)');
       body += G('🧹 重置');
-      body += cmd('resetProf()/resetPaths()', '清空 profiler / 路径缓存');
+      body += cmd('resetProf()', '清空 profiler 重新采样');
       body += cmd('resetStats()', '清空滞动统计重新采样');
       body += `</div>`;
       console.log(body);
@@ -112,10 +108,6 @@ module.exports = {
       return `共 ${hot.length} 个模块，采样 ${(Memory.profiler && Memory.profiler.samples) || 0} 次`;
     };
 
-    global.paths = function () {
-      const s = pathCache.stats();
-      return `🗺 路径缓存：命中率 ${s.hitRate}% | ${s.hits} 命中 / ${s.misses} 未命中 | 缓存 ${s.entries} 条`;
-    };
 
     global.intel = function () {
       const i = Memory.intel || {};
@@ -124,7 +116,6 @@ module.exports = {
     };
 
     global.resetProf = function () { Memory.profiler = { avg: {}, last: {}, samples: 0 }; return '✅ profiler 已清空，重新采样中'; };
-    global.resetPaths = function () { Memory.pathCache = { entries: {}, hits: 0, misses: 0 }; return '✅ 路径缓存已清空'; };
     global.resetStats = function () { Memory.stats2 = {}; return '✅ 滞动统计已清空，重新采样中'; };
 
     // 过往 N tick 平均统计

@@ -40,42 +40,6 @@ module.exports = {
   },
 
   /**
-   * 【S1 已废弃·保留傅兼容】harvester 现由 source.scheduler.assignSlot 统一分配
-   * （它会同时设好 slot 和 sourceId）。本方法仅作紧急回退，勿再新增调用。
-   */
-  assignSource(creep) {
-    const room = creep.room;
-    if (!room.memory.sources) this.ensureSourceCapacity(room);
-
-    // 统计每个 source 当前已绑定多少采集者（harvester / miner 均算）
-    const assigned = {};
-    for (const name in Game.creeps) {
-      const c = Game.creeps[name];
-      if ((c.memory.role === 'harvester' || c.memory.role === 'miner') && c.memory.sourceId) {
-        assigned[c.memory.sourceId] = (assigned[c.memory.sourceId] || 0) + 1;
-      }
-    }
-
-    const sources = room.find(FIND_SOURCES);
-    // 选"剩余空位最多"的 source，让采集者均匀分布
-    let best = null;
-    let bestFree = 0;
-    for (const source of sources) {
-      const cap = room.memory.sources[source.id] || 1;
-      const free = cap - (assigned[source.id] || 0);
-      if (free > bestFree) {
-        bestFree = free;
-        best = source;
-      }
-    }
-    if (best) {
-      creep.memory.sourceId = best.id;
-      return best.id;
-    }
-    return null;
-  },
-
-  /**
    * 【S1 统一】房间总开采位：委托给 source.scheduler（唯一权威调度源）。
    * scheduler 的精确格子数才是真实可占位数；未规划时回退到本地 8 邻粗算。
    */

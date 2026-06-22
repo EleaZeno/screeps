@@ -133,10 +133,4 @@ module.exports = {
     }
     Memory.intel.tasks.distances = cache;
   },
-
-  /** 供控制台/dashboard 一行读取当前情报摘要 */
-  summary() {
-    const i = Memory.intel || {};
-    return JSON.stringify({ updatedAt: i.updatedAt, expansion: i.tasks && i.tasks.expansion });
-  },
 };
