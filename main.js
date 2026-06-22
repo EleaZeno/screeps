@@ -24,6 +24,9 @@ const towerManager = require('tower.manager');
 const cpuManager = require('cpu.manager');
 const layoutPlanner = require('layout.planner');
 const intelManager = require('intel.manager');
+const profiler = require('cpu.profiler');
+const pathCache = require('path.cache');
+const dashboard = require('dashboard');
 
 const ROLES = {
   harvester: require('role.harvester'),
@@ -36,6 +39,10 @@ const ROLES = {
 };
 
 module.exports.loop = function () {
+  profiler.init(config.profiler !== false);
+  pathCache.init();
+  const _t0 = profiler.start();
+
   // 0. Memory 初始化
   if (!Memory.creeps) Memory.creeps = {};
   if (!Memory.stats) Memory.stats = {};
@@ -51,14 +58,15 @@ module.exports.loop = function () {
     if (!room.controller || !room.controller.my) continue;
 
     sourceManager.ensureSourceCapacity(room);
-    scheduler.planSlots(room); // 空闲 CPU 预计算开采格+路线（只算一次，缓存）
-    if (config.economy.autoBuild) buildPlanner.run(room);
-    if (config.economy.layoutPlanning) { layoutPlanner.run(room); layoutPlanner.buildRoads(room); }
-    if (config.military.towerDefense) towerManager.run(room);
-    spawnManager.run(room);
+    profiler.wrap('sched', () => scheduler.planSlots(room)); // 空闲 CPU 预计算开采格+路线（只算一次，缓存）
+    if (config.economy.autoBuild) profiler.wrap('build', () => buildPlanner.run(room));
+    if (config.economy.layoutPlanning) profiler.wrap('layout', () => { layoutPlanner.run(room); layoutPlanner.buildRoads(room); });
+    if (config.military.towerDefense) profiler.wrap('tower', () => towerManager.run(room));
+    profiler.wrap('spawn', () => spawnManager.run(room));
   }
 
   // 3. 执行每个 creep 的角色逻辑（带 try/catch 隔离）
+  const _tc = profiler.start();
   for (const name in Game.creeps) {
     const creep = Game.creeps[name];
     const role = ROLES[creep.memory.role];
@@ -67,18 +75,20 @@ module.exports.loop = function () {
       catch (err) { console.log(`[ERR] ${name} (${creep.memory.role}): ${err.stack || err}`); }
     }
   }
+  profiler.end('creeps', _tc);
 
   // 4. 闲置 CPU 变现：bucket 满时自动生成 pixel（全局每 tick 检查一次）
-  if (config.economy.autoPixel) cpuManager.run();
+  if (config.economy.autoPixel) profiler.wrap('pixel', () => cpuManager.run());
 
-  // 4b. 闲置 CPU/内存全面利用：预计算情报/威胁/扩张预案/距离矩阵（严格 bucket 门控）
-  if (config.economy.intelPlanning) intelManager.run(config.economy.intelReserveBucket);
+  // 4b. 闲置 CPU/内存全面利用：预计算情报/威胁/扩张预案/距离矩阵（严格 bucket 门控，多房自动覆盖）
+  if (config.economy.intelPlanning) profiler.wrap('intel', () => intelManager.run(config.economy.intelReserveBucket));
 
-  // 5. 轻量统计（每 10 tick）
-  if (Game.time % 10 === 0) reportStats();
+  // 5. 控制台 dashboard（每 N tick）
+  profiler.tickDone();
+  if (Game.time % (config.dashboardInterval || 15) === 0) dashboard.print();
 };
 
-function reportStats() {
+function reportStats_DEPRECATED() {
   for (const roomName in Game.rooms) {
     const room = Game.rooms[roomName];
     if (!room.controller || !room.controller.my) continue;

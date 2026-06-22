@@ -20,6 +20,10 @@ module.exports = {
     intelReserveBucket: 4000,  // intel 任务的 bucket 保留水位：低于此值不跑重计算，绝不抢主循环 CPU
   },
 
+  // ---- 诊断/可观测性 ----
+  profiler: true,              // 每模块 CPU 耗时剖析（EMA 滑动平均，找热点），开销极小可一键关
+  dashboardInterval: 15,       // 控制台 dashboard 打印间隔（tick），不刷屏
+
   // ---- 军事：防御常开，进攻默认关 ----
   military: {
     towerDefense: true,        // tower 自动打敌人 + 修墙（常开，几乎不耗 CPU）
