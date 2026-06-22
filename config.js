@@ -23,6 +23,7 @@ module.exports = {
   // ---- 诊断/可观测性 ----
   profiler: true,              // 每模块 CPU 耗时剖析（EMA 滑动平均，找热点），开销极小可一键关
   dashboardInterval: 15,       // 控制台 dashboard 打印间隔（tick），不刷屏
+  visualOverlay: true,         // 游戏画面内 RoomVisual 图形叠加（进度条/人口/威胁）
 
   // ---- 军事：防御常开，进攻默认关 ----
   military: {

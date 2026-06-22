@@ -27,6 +27,8 @@ const intelManager = require('intel.manager');
 const profiler = require('cpu.profiler');
 const pathCache = require('path.cache');
 const dashboard = require('dashboard');
+const commands = require('commands');
+const visual = require('visual');
 
 const ROLES = {
   harvester: require('role.harvester'),
@@ -41,6 +43,7 @@ const ROLES = {
 module.exports.loop = function () {
   profiler.init(config.profiler !== false);
   pathCache.init();
+  commands.register(); // 注册控制台交互命令（help/dash/prof/attack 等）
   const _t0 = profiler.start();
 
   // 0. Memory 初始化
@@ -63,6 +66,7 @@ module.exports.loop = function () {
     if (config.economy.layoutPlanning) profiler.wrap('layout', () => { layoutPlanner.run(room); layoutPlanner.buildRoads(room); });
     if (config.military.towerDefense) profiler.wrap('tower', () => towerManager.run(room));
     profiler.wrap('spawn', () => spawnManager.run(room));
+    if (config.visualOverlay !== false) profiler.wrap('visual', () => { try { visual.draw(room); } catch (e) { /* 可视化失败不影响主逻辑 */ } });
   }
 
   // 3. 执行每个 creep 的角色逻辑（带 try/catch 隔离）
