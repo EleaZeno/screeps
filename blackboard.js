@@ -41,20 +41,32 @@ module.exports = {
   _collectHarvest(room, tasks) {
     scheduler.planSlots(room); // 确保开采格已预计算（吃空闲CPU，已缓存则瞬返）
     const slots = (room.memory.slots && room.memory.slots.all) || [];
+    // 【关键设计】采集任务不按物理格无限开，而按 source 产能限量：
+    //   一个 source 5 energy/tick 再生，1-2 个采集者即可榨干，多了是浪费。
+    //   每个 source 最多开 maxPerSource 个采集格任务（取最近的几个格）。
+    //   这防止"16 个格全开 → 所有 creep 被采集吸走 → 没人升级/建造"。
+    const maxPerSource = 2;
+    const bySource = {};
     for (const slot of slots) {
-      const source = Game.getObjectById(slot.sourceId);
+      (bySource[slot.sourceId] = bySource[slot.sourceId] || []).push(slot);
+    }
+    for (const sid in bySource) {
+      const source = Game.getObjectById(sid);
       if (!source) continue;
-      // 价值随 source 当前能量比例升高（能量越满越该派人采，免得浪费再生）
       const fill = source.energy / Math.max(1, source.energyCapacity);
-      tasks.push({
-        id: `harvest:${slot.x},${slot.y}`,
-        type: 'harvest',
-        targetId: slot.sourceId,
-        pos: { x: slot.x, y: slot.y, roomName: room.name },
-        baseValue: 60 + fill * 20, // 60..80
-        capacity: 1,
-        meta: { slot },
-      });
+      // 取离 spawn 最近的 maxPerSource 个格（slot.dist 已由 scheduler 预算）
+      const chosen = bySource[sid].sort((a, b) => (a.dist || 0) - (b.dist || 0)).slice(0, maxPerSource);
+      for (const slot of chosen) {
+        tasks.push({
+          id: `harvest:${slot.x},${slot.y}`,
+          type: 'harvest',
+          targetId: sid,
+          pos: { x: slot.x, y: slot.y, roomName: room.name },
+          baseValue: 60 + fill * 20, // 60..80
+          capacity: 1,
+          meta: { slot },
+        });
+      }
     }
   },
 
