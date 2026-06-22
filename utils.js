@@ -9,11 +9,11 @@
 module.exports = {
   /**
    * 统一移动接口：CPU 只算一次最优路径复用，+ 防堵塞三级决策。
-   * 防堵逻辑（你说的调度平衡）：检测原地卡顿几 tick 后，CPU 在三选一里升级：
+   * 防堵逻辑（修复版）：检测原地卡顿几 tick 后，CPU 三选一里升级：
    *   ≤1 tick 原地未动：正常（可能刚好会合/疲劳），不管
-   *   2 tick 卡：重算路径且避让别人（ignoreCreeps:false 强制绕路）= “绕远路”
-   *   ≥4 tick 卡：据弃缓存重走全新路 + 随机抩一下（防死锁）= 换路线
-   * 路线稳定时复用 30 tick（算一次走很久，省 CPU）。
+   *   2~3 tick 卡：重算路径且 ignoreCreeps（穿过友军强行寻路，不被堵）
+   *   ≥4 tick 卡：丢弃缓存重走全新路 + 同 tick 只下一个随机挪步（打破死锁）
+   * 路线稳定时复用 20 tick（算一次走很久，省 CPU）。
    */
   moveTo(creep, target, color) {
     const m = creep.memory;
@@ -22,21 +22,24 @@ module.exports = {
     else m._stk = 0;
     m._mx = creep.pos.x; m._my = creep.pos.y;
 
-    let reuse = 30;          // 默认：路线稳定，算一次复用 30 tick
-    let ignoreCreeps = false;
     const stk = m._stk || 0;
 
+    // ≥4 tick 重度卡死 → 同 tick 只下一个随机挪步打破死锁（不要再叠 moveTo，否则被覆盖）
     if (stk >= 4) {
-      // 重度卡顿 → 换路线：据弃缓存路径重算全新路 + 随机抩一步防死锁
-      reuse = 0;
       delete m._move;
-      if (stk >= 6) {
-        const dirs = [TOP, TOP_RIGHT, RIGHT, BOTTOM_RIGHT, BOTTOM, BOTTOM_LEFT, LEFT, TOP_LEFT];
-        creep.move(dirs[Math.floor(Math.random() * 8)]); // 随机挪一格打破对撞死锁
-      }
-    } else if (stk >= 2) {
-      // 轻度卡顿 → 绕远路：重算路径且避让其他 creep
+      const dirs = [TOP, TOP_RIGHT, RIGHT, BOTTOM_RIGHT, BOTTOM, BOTTOM_LEFT, LEFT, TOP_LEFT];
+      // 优先朝目标大致方向随机偏移，找一个可走的空格强行挪出去
+      creep.move(dirs[Math.floor(Math.random() * 8)]);
+      return OK;
+    }
+
+    let reuse = 20;
+    let ignoreCreeps = false;
+    if (stk >= 2) {
+      // 轻度卡顿 → 重算路径 + 无视 creep 强行穿过（关键修复：原来 ignoreCreeps 从没设 true）
       reuse = 0;
+      ignoreCreeps = true;
+      delete m._move;
     }
 
     return creep.moveTo(target, {
@@ -52,7 +55,6 @@ module.exports = {
    * spawn/extension（孵化命脉）> tower（防御）> storage（仓库）
    */
   findEnergyDropOff(creep) {
-    // 优先 spawn / extension
     let targets = creep.room.find(FIND_MY_STRUCTURES, {
       filter: (s) =>
         (s.structureType === STRUCTURE_EXTENSION || s.structureType === STRUCTURE_SPAWN) &&
@@ -60,7 +62,6 @@ module.exports = {
     });
     if (targets.length) return creep.pos.findClosestByRange(targets);
 
-    // 其次 tower（留点余量，低于 80% 才补）
     targets = creep.room.find(FIND_MY_STRUCTURES, {
       filter: (s) =>
         s.structureType === STRUCTURE_TOWER &&
@@ -68,7 +69,6 @@ module.exports = {
     });
     if (targets.length) return creep.pos.findClosestByRange(targets);
 
-    // 最后 storage / container
     targets = creep.room.find(FIND_STRUCTURES, {
       filter: (s) =>
         (s.structureType === STRUCTURE_STORAGE || s.structureType === STRUCTURE_CONTAINER) &&
@@ -83,7 +83,6 @@ module.exports = {
    * 让 creep 去取能量（采集者之外的角色用）：优先掉落能量/容器，再去 source 现采。
    */
   gatherEnergy(creep) {
-    // 优先捡掉落的能量（高效，不浪费）
     const dropped = creep.pos.findClosestByRange(FIND_DROPPED_RESOURCES, {
       filter: (r) => r.resourceType === RESOURCE_ENERGY && r.amount > 50,
     });
@@ -92,7 +91,6 @@ module.exports = {
       return;
     }
 
-    // 其次从 container/storage 取
     const store = creep.pos.findClosestByRange(FIND_STRUCTURES, {
       filter: (s) =>
         (s.structureType === STRUCTURE_CONTAINER || s.structureType === STRUCTURE_STORAGE) &&
@@ -103,7 +101,6 @@ module.exports = {
       return;
     }
 
-    // 最后自己去采 source
     const source = creep.pos.findClosestByRange(FIND_SOURCES_ACTIVE);
     if (source) {
       if (creep.harvest(source) === ERR_NOT_IN_RANGE) this.moveTo(creep, source, '#ffaa00');
