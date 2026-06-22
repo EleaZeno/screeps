@@ -42,6 +42,12 @@ module.exports = {
     // ---- 计算目标数量 ----
     const sources = room.find(FIND_SOURCES);
     const numSources = sources.length;
+
+    // ---- 主动淘汰过时小号（中央调度，不给 creep 自由）----
+    // 能量上限提升后，旧的小采集者效率低。当 cap 比某 creep 出生时大很多，
+    // 主动回收它（送回 spawn 拆解返还能量），换成吃满新 cap 的大号。每 tick 最多标记 1 个。
+    this.recycleObsolete(room, spawn, cap);
+
     // 静态采矿要发挥威力需要“大 miner”（能堆 4-5 WORK 榨干 source）。
     // 但 RCL2 extension 没建完时能量上限只有 300，miner 太小吃不满 source。
     // 过渡策略：能量上限 < 500 时先用“多小 harvester 填满开采位”，进账更快；
@@ -179,7 +185,33 @@ module.exports = {
     return body;
   },
 
-  /** 战斗身体：defender/attacker 近战，ranged 远程 */
+  /**
+   * 主动淘汰过时小号：cap 提升后，body 远小于当前能造的最大号的采集者，
+   * 标记 recycle。creep 逻辑里看到 recycle 标记会跑回 spawn 自我拆解返还能量。
+   * 哲学：中央调度统一决策，旧号不达标主动换新，不留低效单位。
+   */
+  recycleObsolete(room, spawn, cap) {
+    // 基建未建完时不回收（避免青黄不接停采），只在 cap≥500 静态期做新陈代谢
+    if (cap < 500) return;
+    if (Game.time % 10 !== 0) return; // 低频检查省 CPU
+    const idealWork = Math.min(6, Math.floor((cap - 50) / 100)); // 当前能造的采集者 WORK 数
+    let marked = 0;
+    for (const name in Game.creeps) {
+      if (marked >= 1) break; // 每次最多换 1 个，平滑过渡
+      const c = Game.creeps[name];
+      if (c.room.name !== room.name) continue;
+      if (c.memory.role !== 'harvester') continue;
+      if (c.memory.recycle) continue;
+      const work = c.getActiveBodyparts(WORK);
+      // 现役号比理想号小一半以上 → 过时，标记回收
+      if (work > 0 && work <= idealWork - 2) {
+        c.memory.recycle = true;
+        marked++;
+        console.log(`[RECYCLE] ${name} W${work} 过时(理想W${idealWork})，标记回收换大号`);
+      }
+    }
+  },
+
   combatBody(kind, energyCap) {
     const body = [];
     if (kind === 'ranged') {

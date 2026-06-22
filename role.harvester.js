@@ -15,6 +15,16 @@ const utils = require('utils');
 
 module.exports = {
   run(creep) {
+    // 中央调度标记回收（过时小号）：跑回 spawn 拆解返还能量，不浪费
+    if (creep.memory.recycle) {
+      const spawn = creep.pos.findClosestByRange(FIND_MY_SPAWNS);
+      if (spawn) {
+        if (creep.pos.isNearTo(spawn)) spawn.recycleCreep(creep);
+        else utils.moveTo(creep, spawn, '#888888');
+        return;
+      }
+    }
+
     // 状态切换：空了 -> 去采集；满了 -> 去送货
     if (creep.memory.working && creep.store[RESOURCE_ENERGY] === 0) {
       creep.memory.working = false;
