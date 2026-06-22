@@ -31,6 +31,8 @@ module.exports = {
         `<div style="font-family:Consolas,monospace;font-size:12px;background:#1a1a1a;padding:8px 12px;border-radius:6px;border:1px solid #333;line-height:1.6">` +
         `<div style="color:#4fc3f7;font-weight:bold;font-size:13px">🎮 控制台命令大全</div>` +
         cmd('dash()', '立即打印中文图形仪表盘') +
+        cmd('hud(\'tr\')', 'HUD位置: tl/tr/bl/ctrl/mini/off') +
+        cmd('hud()', '一键显示/隐藏 HUD') +
         cmd('textMode() / htmlMode()', '切换纯文本 / HTML 仪表盘') +
         cmd('prof()', 'CPU 热点排行（找性能瓶颈）') +
         cmd('paths()', '路径缓存命中率') +
@@ -50,6 +52,20 @@ module.exports = {
     }
 
     global.dash = function () { dashboard.print(); return '✅ 仪表盘已刷新'; };
+
+    // 房间 HUD 位置/显隐切换
+    global.hud = function (pos) {
+      Memory.hud = Memory.hud || { pos: 'tr', on: true };
+      if (pos === undefined) { // 无参：显隐切换
+        Memory.hud.on = !Memory.hud.on;
+        return Memory.hud.on ? '👁 HUD 已显示' : '🙈 HUD 已隐藏（再输 hud() 恢复）';
+      }
+      const valid = ['tl', 'tr', 'bl', 'ctrl', 'mini', 'off'];
+      if (!valid.includes(pos)) return '❌ 位置只能是: tl(左上) tr(右上) bl(左下) ctrl(跟控制器) mini(极简) off(关)';
+      Memory.hud.pos = pos; Memory.hud.on = (pos !== 'off');
+      const CN = { tl: '左上角', tr: '右上角', bl: '左下角', ctrl: '控制器旁', mini: '极简版(左上)', off: '关闭' };
+      return `✅ HUD → ${CN[pos]}`;
+    };
 
     global.textMode = function () {
       Memory.config = Memory.config || {}; Memory.config.dashboardText = true;
