@@ -15,6 +15,7 @@ module.exports = {
     autoPixel: true,           // bucket 满 10000 时自动生成 pixel（闲置 CPU 变现）
     rushInfra: true,           // RCL≤3 且有工地时，优先突击建 extension（打破低RCL死循环，加速发育）
     layoutPlanning: true,      // 用空闲 CPU 预计算基地布局+道路网络，缓存后低耗执行
+    harvesterOversub: 1.6,     // 采集者超额订阅系数：实际人数 = 开采格数×此值（总有人在送货路上，多出的轮替补位）
   },
 
   // ---- 军事：防御常开，进攻默认关 ----

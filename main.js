@@ -18,6 +18,7 @@
 const config = require('config');
 const spawnManager = require('spawn.manager');
 const sourceManager = require('source.manager');
+const scheduler = require('source.scheduler');
 const buildPlanner = require('build.planner');
 const towerManager = require('tower.manager');
 const cpuManager = require('cpu.manager');
@@ -49,6 +50,7 @@ module.exports.loop = function () {
     if (!room.controller || !room.controller.my) continue;
 
     sourceManager.ensureSourceCapacity(room);
+    scheduler.planSlots(room); // 空闲 CPU 预计算开采格+路线（只算一次，缓存）
     if (config.economy.autoBuild) buildPlanner.run(room);
     if (config.economy.layoutPlanning) { layoutPlanner.run(room); layoutPlanner.buildRoads(room); }
     if (config.military.towerDefense) towerManager.run(room);

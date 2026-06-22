@@ -40,9 +40,15 @@ module.exports = {
     // ---- 计算目标数量 ----
     const sources = room.find(FIND_SOURCES);
     const numSources = sources.length;
-    const useStatic = config.economy.useStaticMining && rcl >= 2; // RCL2+ 才上静态采矿
+    // 静态采矿要发挥威力需要“大 miner”（能堆 4-5 WORK 榨干 source）。
+    // 但 RCL2 extension 没建完时能量上限只有 300，miner 太小吃不满 source。
+    // 过渡策略：能量上限 < 500 时先用“多小 harvester 填满开采位”，进账更快；
+    // extension 建完(cap≥500)后再切回高效的“大 miner + hauler”。
+    const bigMinerReady = cap >= 500;
+    const useStatic = config.economy.useStaticMining && rcl >= 2 && bigMinerReady;
     const hasConstruction = room.find(FIND_MY_CONSTRUCTION_SITES).length > 0;
     const hostiles = room.find(FIND_HOSTILE_CREEPS).length;
+    const spots = sourceManager.totalMiningSpots(room);
 
     // 防御：有敌人且开启自动防御
     if (config.military.autoDefendCreeps && hostiles > 0 && n('defender') < Math.min(hostiles + 1, 4)) {
@@ -62,15 +68,31 @@ module.exports = {
         ['builder', hasConstruction ? (rushInfra ? 3 : config.population.buildersWithSites) : 0],
         ['upgrader', rushInfra ? 1 : this.upgraderTarget(room, rcl)],
       ];
-    } else {
-      // 早期 harvester 模式（RCL1）：快速扩张——少量采集者 + 立刻上 upgrader 狂升 controller 冲 RCL/GCL
-      const spots = sourceManager.totalMiningSpots(room);
-      // RCL1 只需 2-3 个 harvester 就能填满能量，多了浪费；剩余能量全砂 upgrader 升级
-      const harvTarget = Math.min(spots, rcl <= 1 ? 3 : 4);
+    } else if (rcl >= 2) {
+      // 过渡发育期（RCL2 但 extension 没建完，cap<500）：填满开采位最大化进账。
+      // 多个小 harvester 同时占满 9 个开采位 + 多 builder 突击把 extension 建完，
+      // 等 cap≥500 后上面 useStatic 会自动切回高效的大 miner+hauler。
+      const slots = scheduler.totalSlots(room) || spots;
+      const harvFill = Math.min(
+        Math.ceil(slots * (config.economy.harvesterOversub || 1.4)),
+        12 // 硬上限，避免 spawn 队列堵死/CPU 浪费
+      ); // 超额订阅：开采格×oversub（总有人在送货路上，多出的轮替补位）
+      // 能量紧张期（cap<500 且有 extension 工地）：集中火力建 extension，
+      // 暂停 upgrader（只靠 builder 建完后顺手升级），避免能量被升级分走。
+      const energyTight = hasConstruction && cap < 500;
       targets = [
-        ['harvester', Math.min(2, harvTarget)],   // 先保 2 个采集者入账
-        ['upgrader', 2],                          // 立刻两个 upgrader 狂升 controller（保证 RCL 上涨）
-        ['harvester', harvTarget],                // 再补足采集者
+        ['harvester', Math.min(3, harvFill)],   // 先保 3 个采集者打底
+        ['builder', hasConstruction ? 4 : 0],   // 突击建 extension（4 个集中火力）
+        ['harvester', harvFill],                 // 再把开采位填满
+        ['upgrader', energyTight ? 0 : 1],       // 紧张期不出 upgrader，能量全给建 extension
+      ];
+    } else {
+      // RCL1：少量采集者 + 立刻两个 upgrader 狂升 controller 冲 RCL/GCL
+      const harvTarget = Math.min(spots, 3);
+      targets = [
+        ['harvester', Math.min(2, harvTarget)],
+        ['upgrader', 2],
+        ['harvester', harvTarget],
         ['builder', hasConstruction ? (rushInfra ? 3 : config.population.buildersWithSites) : 0],
         ['upgrader', rushInfra ? 2 : this.upgraderTarget(room, rcl)],
       ];

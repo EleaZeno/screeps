@@ -10,6 +10,7 @@
  */
 
 const sourceManager = require('source.manager');
+const scheduler = require('source.scheduler');
 const utils = require('utils');
 
 module.exports = {
@@ -39,19 +40,30 @@ module.exports = {
         }
       }
     } else {
-      // 采集：确保绑定了 source
-      if (!creep.memory.sourceId) {
-        sourceManager.assignSource(creep);
+      // 采集：分配专属开采格（调度器），走到那一格采 —— 根上消除抢位冲突
+      if (!creep.memory.slot) {
+        scheduler.assignSlot(creep);
       }
+      const slot = creep.memory.slot;
       let source = creep.memory.sourceId ? Game.getObjectById(creep.memory.sourceId) : null;
-      // 绑定的 source 没能量了，临时找个有能量的
+      // 绑定 source 没能量了，临时找个有能量的
       if (!source || source.energy === 0) {
         source = creep.pos.findClosestByRange(FIND_SOURCES_ACTIVE);
-      }
-      if (source) {
-        if (creep.harvest(source) === ERR_NOT_IN_RANGE) {
-          utils.moveTo(creep, source, '#ffaa00');
+        if (source) {
+          if (creep.harvest(source) === ERR_NOT_IN_RANGE) utils.moveTo(creep, source, '#ffaa00');
         }
+        return;
+      }
+      // 有专属格子：先走到格子上（避免多人振在同一格互堵），再采
+      if (slot && (creep.pos.x !== slot.x || creep.pos.y !== slot.y)) {
+        // 已在 source 旁且能采到就直接采，否则走向专属格
+        if (creep.pos.isNearTo(source)) {
+          creep.harvest(source);
+        } else {
+          creep.moveTo(slot.x, slot.y, { reusePath: 15, visualizePathStyle: { stroke: '#ffaa00' } });
+        }
+      } else if (creep.harvest(source) === ERR_NOT_IN_RANGE) {
+        utils.moveTo(creep, source, '#ffaa00');
       }
     }
   },
