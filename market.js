@@ -38,12 +38,31 @@ module.exports = {
       return assignment;
     }
 
-    // 1. 生成所有 (creep, task) 配对及其效用分
+    // 1. 生成 (creep, task) 配对及其效用分
+    //    【CPU 优化：距离剖枝】不再暴力算所有 creep×task。
+    //    对每个 creep，同类任务按距离预排序只取最近 CAND_PER_TYPE 个（最近的同类
+    //    效用必然最高，不改变最优解）+ 高价值任务。把 O(N×M) 压到 ≈O(N×k)。
+    const CAND_PER_TYPE = 4;
+    // 按类型分桶
+    const byType = {};
+    for (const task of tasks) (byType[task.type] = byType[task.type] || []).push(task);
     const pairs = [];
     for (const creep of creeps) {
-      for (const task of tasks) {
-        const s = utility.score(creep, task, weights);
-        if (s > 0) pairs.push({ creep, task, score: s });
+      const cx = creep.pos.x, cy = creep.pos.y, cr = creep.room.name;
+      for (const type in byType) {
+        let cand = byType[type];
+        // 同类任务多于阈值时，按距离预排序取最近几个（廉价切比雪夫距离）
+        if (cand.length > CAND_PER_TYPE) {
+          cand = cand.slice().sort((a, b) => {
+            const da = a.pos && a.pos.roomName === cr ? Math.max(Math.abs(a.pos.x - cx), Math.abs(a.pos.y - cy)) : 99;
+            const db = b.pos && b.pos.roomName === cr ? Math.max(Math.abs(b.pos.x - cx), Math.abs(b.pos.y - cy)) : 99;
+            return da - db;
+          }).slice(0, CAND_PER_TYPE);
+        }
+        for (const task of cand) {
+          const s = utility.score(creep, task, weights);
+          if (s > 0) pairs.push({ creep, task, score: s });
+        }
       }
     }
 

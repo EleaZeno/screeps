@@ -56,7 +56,6 @@ module.exports = {
     const name = this._nameFor(topType) + '_' + Game.time;
     spawn.spawnCreep(body, name, { memory: { born: Game.time } });
   },
-
   /** 按任务类型 + 能量上限造最优 body */
   _bodyFor(type, cap) {
     switch (type) {
@@ -123,6 +122,12 @@ module.exports = {
   },
 
   _nameFor(type) {
-    return { harvest: 'Miner', haul: 'Hauler', fill: 'Filler', upgrade: 'Worker', build: 'Builder', defend: 'Guard' }[type] || 'Creep';
+    // 按职能清晰命名（creep 名不可改，只能出生时定；旧名 creep 会随 TTL 自然淘汰）。
+    // Miner=钉 container 静采；Carrier=专职搬运；Filler=回填 spawn/ext；
+    // Upgrader=钉 controller；Builder=盖楼修路；Guard=防御。保持 ASCII 控制台安全。
+    return {
+      harvest: 'Miner', haul: 'Carrier', fill: 'Filler',
+      upgrade: 'Upgrader', build: 'Builder', repair: 'Repairer', defend: 'Guard',
+    }[type] || 'Creep';
   },
 };

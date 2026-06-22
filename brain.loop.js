@@ -21,8 +21,15 @@ const market = require('market');
 const executor = require('executor');
 const spawning = require('spawning');
 const adaptive = require('adaptive');
+// —— 工程规划层（复用旧系统已写好的成熟规划器，之前重写时漏接）——
+// 这是大脑"会运筹/布局"的关键：主动规划 container/extension/tower/路网，
+// 往世界里添加工地，市场自然会派人去建。不破坏效用/市场原则。
+let buildPlanner, layoutPlanner;
+try { buildPlanner = require('build.planner'); } catch (e) { buildPlanner = null; }
+try { layoutPlanner = require('layout.planner'); } catch (e) { layoutPlanner = null; }
 
 module.exports.loop = function () {
+  const _cpuStart = (typeof Game !== 'undefined' && Game.cpu && Game.cpu.getUsed) ? Game.cpu.getUsed() : 0;
   // 清理死 creep 内存
   for (const name in Memory.creeps) {
     if (!Game.creeps[name]) delete Memory.creeps[name];
@@ -33,6 +40,11 @@ module.exports.loop = function () {
     if (!room.controller || !room.controller.my) continue;
 
     const myCreeps = room.find(FIND_MY_CREEPS);
+
+    // 0. 工程规划层：主动布局基建（这让大脑"会运筹"——多建 container/扩展/修路/规划布局）
+    // build.planner 内部每20tick、layout 每100tick 才真跑，CPU 极低。产出的工地由市场派人建。
+    if (layoutPlanner) { try { layoutPlanner.run(room); layoutPlanner.buildRoads(room); } catch (e) { console.log('layout err ' + e); } }
+    if (buildPlanner) { try { buildPlanner.run(room); } catch (e) { console.log('build err ' + e); } }
 
     // 1. 战略层：想要什么
     const weights = brain.think(room);
@@ -57,5 +69,19 @@ module.exports.loop = function () {
       const d = (Memory.brain && Memory.brain._diag) || {};
       console.log(`🧠 ${roomName} RCL${room.controller.level} creeps=${myCreeps.length} 计划=[${d.goal || '?'}:${d.plan || ''}] 缺口=[${gapStr}]`);
     }
+  }
+
+  // ===== CPU 实测（写入 Memory 供外部读回）=====
+  if (typeof Game !== 'undefined' && Game.cpu && Game.cpu.getUsed) {
+    const used = Game.cpu.getUsed();
+    if (!Memory.brain) Memory.brain = {};
+    const cm = Memory.brain.cpu || { ema: used, max: 0, n: 0 };
+    cm.last = Math.round(used * 100) / 100;
+    cm.ema = Math.round((cm.ema * 0.9 + used * 0.1) * 100) / 100;
+    cm.max = Math.max(cm.max, Math.round(used * 100) / 100);
+    cm.n = (cm.n || 0) + 1;
+    cm.creeps = Object.keys(Game.creeps).length;
+    cm.bucket = Game.cpu.bucket;
+    Memory.brain.cpu = cm;
   }
 };
