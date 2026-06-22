@@ -20,6 +20,7 @@ const spawnManager = require('spawn.manager');
 const sourceManager = require('source.manager');
 const buildPlanner = require('build.planner');
 const towerManager = require('tower.manager');
+const cpuManager = require('cpu.manager');
 
 const ROLES = {
   harvester: require('role.harvester'),
@@ -62,7 +63,10 @@ module.exports.loop = function () {
     }
   }
 
-  // 4. 轻量统计（每 10 tick）
+  // 4. 闲置 CPU 变现：bucket 满时自动生成 pixel（全局每 tick 检查一次）
+  if (config.economy.autoPixel) cpuManager.run();
+
+  // 5. 轻量统计（每 10 tick）
   if (Game.time % 10 === 0) reportStats();
 };
 
@@ -79,8 +83,9 @@ function reportStats() {
     const c = room.controller;
     const pct = c.progressTotal ? ((c.progress / c.progressTotal) * 100).toFixed(1) : '100';
     const roster = Object.keys(counts).map((k) => `${k[0].toUpperCase()}:${counts[k]}`).join(' ');
+    const pixels = (Game.resources && Game.resources.pixel) || 0;
     console.log(
-      `[${roomName}] RCL${c.level} ${pct}% | E ${room.energyAvailable}/${room.energyCapacityAvailable} | ${roster} | CPU ${Game.cpu.getUsed().toFixed(1)}`
+      `[${roomName}] RCL${c.level} ${pct}% | E ${room.energyAvailable}/${room.energyCapacityAvailable} | ${roster} | CPU ${Game.cpu.getUsed().toFixed(1)}/${Game.cpu.limit} bucket ${Game.cpu.bucket} pixel ${pixels}`
     );
   }
 }

@@ -12,6 +12,7 @@ module.exports = {
     useStaticMining: true,     // 静态 miner + hauler 分离（效率翻倍，急速发育核心）
     aggressiveUpgrade: true,   // 能量富余时狂堆 upgrader 冲 RCL
     autoBuild: true,           // 自动规划建造 extension/container/road/tower
+    autoPixel: true,           // bucket 满 10000 时自动生成 pixel（闲置 CPU 变现）
   },
 
   // ---- 军事：防御常开，进攻默认关 ----
