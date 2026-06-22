@@ -42,7 +42,8 @@ module.exports = {
     //    【CPU 优化：距离剖枝】不再暴力算所有 creep×task。
     //    对每个 creep，同类任务按距离预排序只取最近 CAND_PER_TYPE 个（最近的同类
     //    效用必然最高，不改变最优解）+ 高价值任务。把 O(N×M) 压到 ≈O(N×k)。
-    const CAND_PER_TYPE = 4;
+    const CAND_PER_TYPE = (typeof Memory !== 'undefined' && Memory.brain && Memory.brain.genome && Memory.brain.genome.genes)
+      ? Math.round(Memory.brain.genome.genes.candPerType || 4) : 4;
     // 按类型分桶
     const byType = {};
     for (const task of tasks) (byType[task.type] = byType[task.type] || []).push(task);

@@ -21,6 +21,7 @@ const market = require('market');
 const executor = require('executor');
 const spawning = require('spawning');
 const adaptive = require('adaptive');
+const genome = require('genome');
 // —— 工程规划层（复用旧系统已写好的成熟规划器，之前重写时漏接）——
 // 这是大脑"会运筹/布局"的关键：主动规划 container/extension/tower/路网，
 // 往世界里添加工地，市场自然会派人去建。不破坏效用/市场原则。
@@ -62,12 +63,17 @@ module.exports.loop = function () {
     spawning.run(room, shortage, myCreeps.length);
     // 7. 自适应学习：观察结果，沉淀经验到 playbook（越用越聪明）
     adaptive.observe(room, Memory.brain);
+    // 8. 进化：用真实 progress 增速评估基因组，变异保优淘劣（真自学习，不可自欺）
+    if (!Memory.brain) Memory.brain = {};
+    genome.current(Memory.brain); // 确保基因组已初始化
+    genome.evolve(room, Memory.brain, 300);
 
     // 轻量观测（每 10 tick 打一次大脑状态 + 当前计划）
     if (Game.time % 10 === 0) {
       const gapStr = Object.entries(shortage).map(([k, v]) => `${k}:${Math.round(v)}`).join(' ') || '(满员)';
       const d = (Memory.brain && Memory.brain._diag) || {};
-      console.log(`🧠 ${roomName} RCL${room.controller.level} creeps=${myCreeps.length} 计划=[${d.goal || '?'}:${d.plan || ''}] 缺口=[${gapStr}]`);
+      const gn = (Memory.brain && Memory.brain.genome) || {};
+      console.log(`🧠 ${roomName} RCL${room.controller.level} creeps=${myCreeps.length} 计划=[${d.goal || '?'}:${d.plan || ''}] 进化代=${gn.gen || 0} fit=${gn.lastFitness != null ? gn.lastFitness : '?'} 缺口=[${gapStr}]`);
     }
   }
 

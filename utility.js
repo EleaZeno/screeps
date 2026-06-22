@@ -17,6 +17,14 @@
  */
 
 module.exports = {
+  /** 读当前基因系数（进化产物，不再是写死的拍脑袋值）。缺失时用默认。 */
+  _genes() {
+    if (typeof Memory !== 'undefined' && Memory.brain && Memory.brain.genome && Memory.brain.genome.genes) {
+      return Memory.brain.genome.genes;
+    }
+    return { proxDecay: 0.04, contBonus: 1.35, harvestEnerW: 0.6, haulEnerW: 0.7, useEnerW: 0.8 };
+  },
+
   /** 任务的最终价值 = 基础价值 × 战略层权重 */
   taskValue(task, weights) {
     const w = (weights && weights[task.type]) != null ? weights[task.type] : 1;
@@ -61,12 +69,12 @@ module.exports = {
     const dx = creep.pos.x - task.pos.x;
     const dy = creep.pos.y - task.pos.y;
     const dist = Math.max(Math.abs(dx), Math.abs(dy)); // 切比雪夫距离（Screeps 8向移动）
-    return 1 / (1 + dist * 0.04); // dist=0→1.0, dist=25→0.5, dist=50→0.33
+    return 1 / (1 + dist * this._genes().proxDecay); // k 由基因进化
   },
 
-  /** 连续性奖励（迟滞）：若 creep 上 tick 就在做这个任务，加成，防止来回改主意 */
+  /** 连续性奖励（迟滞）：加成由基因进化 */
   continuity(creep, task) {
-    return creep.memory.taskId === task.id ? 1.35 : 1.0;
+    return creep.memory.taskId === task.id ? this._genes().contBonus : 1.0;
   },
 
   /**
@@ -78,17 +86,17 @@ module.exports = {
     const cap = creep.store.getCapacity(RESOURCE_ENERGY) || 1;
     const cur = creep.store[RESOURCE_ENERGY] || 0;
     const fillRatio = cur / cap; // 0=空, 1=满
+    const g = this._genes();
     switch (task.type) {
       case 'harvest':
-        // miner 钉着采（能量直接掉container），空载更该去；但满WORK矿工不太在乎自身store
-        return 0.4 + (1 - fillRatio) * 0.6; // 空→1.0, 满→0.4
+        return (1 - g.harvestEnerW) + (1 - fillRatio) * g.harvestEnerW; // 空载偏好，强度由基因
       case 'haul':
-        return 0.3 + (1 - fillRatio) * 0.7; // 空载去取货：空→1.0, 满→0.3
+        return (1 - g.haulEnerW) + (1 - fillRatio) * g.haulEnerW; // 空载去取货
       case 'fill':
       case 'upgrade':
       case 'build':
       case 'repair':
-        return 0.2 + fillRatio * 0.8; // 满载去用能：满→1.0, 空→0.2
+        return (1 - g.useEnerW) + fillRatio * g.useEnerW; // 满载去用能
       case 'defend':
         return 1.0; // 防御不看能量
       default:
