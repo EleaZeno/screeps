@@ -80,6 +80,21 @@ module.exports = {
     if (useStatic) {
       // 静态采矿模式：每 source 1 miner + N hauler
       // 哲学：基建未完成时 upgrader 只留 1（防降级），能量全给 builder
+      //
+      // 【关键修复 2026-06-23·静态期 bootstrap 死锁】
+      //   原 bug：cap≥500 一进静态模式，targets 里再无 'harvester'，只点名 miner(需~600能量)。
+      //   若此时采集者很少(如只剩 1 个弱 SOS 体)，能量永远攒不到 600 出 miner，
+      //   harvester 又不再补 → 卡死在「1 个采集者 + 能量封顶 500」，表现=「再也不造收获者」。
+      //   修复：静态期也保留「最低采集者保底」——采集者(harvester+miner) < 2 时，
+      //   先用「当前能量买得起的最大 harvester」把生产力垫起来，再谈高效 miner。
+      const _gatherersNow = n('harvester') + n('miner');
+      if (_gatherersNow < 2) {
+        const body = this.affordableHarvester(cur);
+        if (body) {
+          const res = this.spawnCreep(spawn, 'harvester', body);
+          if (res === OK || res === ERR_NOT_ENOUGH_ENERGY) return;
+        }
+      }
       targets = [
         ['miner', numSources],
         ['hauler', this.haulerTarget(room, numSources)],
@@ -221,6 +236,19 @@ module.exports = {
   harvesterWorkCount(cap) {
     // 留 50 给 CARRY，其余每 100 一个 WORK，最多 6（≈榨干 source 的 12 能量/tick）
     return Math.max(1, Math.min(6, Math.floor((cap - 50) / 100)));
+  },
+
+  /**
+   * 【bootstrap 保底体】用「当前可用能量 cur」造买得起的最大 harvester（含 CARRY，能采能运）。
+   * 与 buildBody 不同：这里看的是当前 energyAvailable 而非 cap，保证采集者奇缺时总能出一个能用的。
+   * cur<200 返回 null（等回血，不出残缺体）。
+   */
+  affordableHarvester(cur) {
+    if (cur < 200) return null; // 连最小 [WORK,CARRY,MOVE]=200 都出不起 → 等回血
+    const units = Math.max(1, Math.min(6, Math.floor(cur / 200))); // [WORK,CARRY,MOVE]=200/单元，上限 6
+    const body = [];
+    for (let i = 0; i < units; i++) { body.push(WORK); body.push(CARRY); body.push(MOVE); }
+    return body;
   },
 
   /**
