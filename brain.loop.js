@@ -20,6 +20,7 @@ const blackboard = require('blackboard');
 const market = require('market');
 const executor = require('executor');
 const spawning = require('spawning');
+const adaptive = require('adaptive');
 
 module.exports.loop = function () {
   // 清理死 creep 内存
@@ -47,11 +48,14 @@ module.exports.loop = function () {
     const shortage = market.shortage(tasks, assignment);
     // 6. 孵化：最缺什么造什么
     spawning.run(room, shortage, myCreeps.length);
+    // 7. 自适应学习：观察结果，沉淀经验到 playbook（越用越聪明）
+    adaptive.observe(room, Memory.brain);
 
-    // 轻量观测（每 10 tick 打一次大脑状态）
+    // 轻量观测（每 10 tick 打一次大脑状态 + 当前计划）
     if (Game.time % 10 === 0) {
       const gapStr = Object.entries(shortage).map(([k, v]) => `${k}:${Math.round(v)}`).join(' ') || '(满员)';
-      console.log(`🧠 ${roomName} RCL${room.controller.level} creeps=${myCreeps.length} tasks=${tasks.length} 缺口=[${gapStr}]`);
+      const d = (Memory.brain && Memory.brain._diag) || {};
+      console.log(`🧠 ${roomName} RCL${room.controller.level} creeps=${myCreeps.length} 计划=[${d.goal || '?'}:${d.plan || ''}] 缺口=[${gapStr}]`);
     }
   }
 };

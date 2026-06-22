@@ -1,84 +1,159 @@
 'use strict';
 
 /*
- * brain.js — L3 战略层（大脑的"意志"：想要什么）
+ * brain.js — L3 战略层 v2（前瞻预测版 / Lookahead Strategist）
  * ==================================================================
- * 每 ~5 tick 跑一次。读世界宏观状态，产出全局权重 weights{}。
- * 权重会乘到每种任务的价值上，从而平滑地调节整个殖民地的行为重心。
+ * 升级要点（相比 v1 纯反应式）：
+ *   1. 前瞻预测 lookahead：不再只看"当前状态"，而是预测"未来事件的提前量"
+ *      - 降级倒计时：连续提前增援（越近越猛），而非 <3000 才硬跳
+ *      - 敌人 ETA + 威胁强度：算敌人到家步数 × 攻击部件，提前布防
+ *      - 能量趋势：用 Memory 里上次能量差预测"会不会饿"，提前回填
+ *      - 工地完工预判：剩余工程量小则平滑把重心移向 upgrade，不浪费 tick
+ *   2. 全连续：所有权重是平滑函数，无硬 if 跳变（除安全红线 defend）
+ *   3. 低 CPU：每 STRATEGY_INTERVAL tick 算一次，结果缓存到 Memory.brain.weights
  *
- * 不做微观决策（那是 market/utility 的事）。只回答一个问题：
- *   "当前局面下，殖民地的重心应该偏向哪几类活？"
- *
- * 输出权重越高 = 该类任务越被优先抢。全连续，无硬切换。
- * 权重存 Memory.brain.weights，供 adaptive 层进一步自适应微调。
+ * 仍只回答一个问题："当前+不久的将来，殖民地重心该偏向哪几类活？"
+ * 微观执行交给 market/utility/executor。
  */
 
 const STRATEGY_INTERVAL = 5;
+const planner = require('planner');
+const adaptive = require('adaptive');
+
+// —— 平滑工具：把 x 从 [a,b] 映射到 [0,1]，超界 clamp ——
+function ramp(x, a, b) {
+  if (b === a) return x >= b ? 1 : 0;
+  const t = (x - a) / (b - a);
+  return t < 0 ? 0 : t > 1 ? 1 : t;
+}
 
 module.exports = {
-  /** 主入口：必要时重算权重，返回当前权重 */
   think(room) {
     if (!Memory.brain) Memory.brain = {};
     const b = Memory.brain;
+    // 即使用缓存权重，也每 tick 记一次能量样本，供趋势预测（极低开销）
+    this._sampleEnergy(room, b);
     if (b.weights && b.nextThink && Game.time < b.nextThink) {
-      return b.weights; // 用缓存权重，省 CPU
+      return b.weights;
     }
-    b.weights = this._compute(room);
+    b.weights = this._compute(room, b);
     b.nextThink = Game.time + STRATEGY_INTERVAL;
     return b.weights;
   },
 
-  /** 计算权重：全连续函数，根据局面平滑调节 */
-  _compute(room) {
+  /** 每 tick 记录能量，用于趋势预测（指数滑动平均的净流入速率） */
+  _sampleEnergy(room, b) {
+    const cur = room.energyAvailable;
+    if (b._lastE === undefined) { b._lastE = cur; b._eRate = 0; return; }
+    const delta = cur - b._lastE;
+    // EMA 平滑净流入速率（alpha=0.3）
+    b._eRate = (b._eRate || 0) * 0.7 + delta * 0.3;
+    b._lastE = cur;
+  },
+
+  _compute(room, b) {
     const ctrl = room.controller;
     const rcl = ctrl ? ctrl.level : 1;
     const cap = room.energyCapacityAvailable;
     const cur = room.energyAvailable;
-    const energyFill = cur / Math.max(1, cap);          // 当前能量充裕度 0..1
-    const hostiles = room.find(FIND_HOSTILE_CREEPS).length;
-    const sites = room.find(FIND_MY_CONSTRUCTION_SITES).length;
+    const energyFill = cur / Math.max(1, cap);
+    const sites = room.find(FIND_MY_CONSTRUCTION_SITES);
+    const nSites = sites.length;
     const storage = room.storage;
     const stored = storage ? storage.store[RESOURCE_ENERGY] : 0;
-    const downgradeRisk = ctrl && ctrl.ticksToDowngrade && ctrl.ticksToDowngrade < 3000;
 
-    // 基础权重（1.0 = 中性）。下面按局面平滑加减。
     const w = {
-      harvest: 1.0,  // 采集：经济根基，恒定偏高
-      haul: 1.0,     // 搬运：跟随采集
-      fill: 1.0,     // 填充：孵化命脉
-      upgrade: 1.0,  // 升级：冲 RCL
-      build: 1.0,    // 建造：扩基建
-      repair: 0.8,   // 维修：平时低优先
-      defend: 1.0,   // 防御：有敌才升
+      harvest: 1.4, haul: 1.2, fill: 1.0,
+      upgrade: 1.0, build: 1.0, repair: 0.8, defend: 0.01,
     };
 
-    // —— 防御压倒一切：有敌人时 defend 权重飙升 ——
-    if (hostiles > 0) {
-      w.defend = 3.0 + hostiles * 0.5;
-    } else {
-      w.defend = 0.01; // 无敌人时几乎不产生防御抢占（仍保留极小值）
+    // ============ 前瞻 1：敌人 ETA + 威胁强度 ============
+    // 不等贴脸——算最近敌人到 spawn 的步数和它的攻击能力，提前按"还有几 tick"布防
+    const hostiles = room.find(FIND_HOSTILE_CREEPS);
+    if (hostiles.length > 0) {
+      const spawn = room.find(FIND_MY_SPAWNS)[0];
+      let minEta = 50, threat = 0;
+      for (const h of hostiles) {
+        const atk = h.getActiveBodyparts ? (h.getActiveBodyparts(ATTACK) + h.getActiveBodyparts(RANGED_ATTACK) * 1.5 + h.getActiveBodyparts(WORK) * 0.5) : 4;
+        threat += Math.max(1, atk);
+        if (spawn) {
+          const d = Math.max(Math.abs(h.pos.x - spawn.pos.x), Math.abs(h.pos.y - spawn.pos.y));
+          if (d < minEta) minEta = d;
+        }
+      }
+      // 越近(eta小)、威胁越大 → defend 越高。eta 远时也保持基础警戒。
+      const proximity = 1 - ramp(minEta, 0, 30); // 贴脸=1，30格外≈0
+      w.defend = 2.0 + threat * 0.4 + proximity * 4.0; // 预判：敌人还在路上就开始拉防御
+      // 受威胁时回填 spawn 优先（要能孵防御 creep）
+      w.fill += 1.0;
     }
 
-    // —— 采集恒定高：经济根基，永远要保证有人采 ——
-    w.harvest = 1.4;
-    w.haul = 1.2;
+    // ============ 前瞻 2：降级倒计时连续增援 ============
+    // v1 是 <3000 硬跳 1.5；这里改成"越接近降级，upgrade 提前量越大"的连续斜坡
+    let downgradeBoost = 0;
+    if (ctrl && ctrl.ticksToDowngrade !== undefined) {
+      // ticksToDowngrade 从 10000→0，越小越危险。5000 开始关注，1000 内拉满
+      const danger = 1 - ramp(ctrl.ticksToDowngrade, 1000, 5000);
+      downgradeBoost = danger * 2.5; // 最高 +2.5，平滑提前
+    }
 
-    // —— 建造优先于升级（基建决定身体上限，先把家盖好）——
-    //    有工地 → build 升高；同时压低 upgrade（除非逼近降级）
-    if (sites > 0) {
-      w.build = 1.6;
-      w.upgrade = downgradeRisk ? 1.5 : 0.6; // 防降级才升级，否则先盖房
+    // ============ 前瞻 3：建造完工预判 ============
+    // 算剩余总工程量，工地快完了就平滑把重心从 build 移向 upgrade（不浪费 tick）
+    let remainWork = 0;
+    for (const s of sites) remainWork += (s.progressTotal - s.progress);
+    if (nSites > 0) {
+      // 剩余工程多 → build 高；剩余少(快完工) → build 平滑下降
+      const buildUrgency = ramp(remainWork, 200, 3000); // 工程量 200..3000 映射强度
+      w.build = 0.6 + buildUrgency * 1.4;               // 0.6 .. 2.0
+      // 工地存在时 upgrade 基础压低，但降级风险通过 downgradeBoost 顶上来
+      w.upgrade = 0.5 + (1 - buildUrgency) * 0.6 + downgradeBoost;
     } else {
-      // 无工地 → 能量全砸升级冲 RCL（aggressiveUpgrade 哲学）
+      // 无工地 → 能量全砸升级冲 RCL，富余越多越狂
       w.build = 0.3;
-      w.upgrade = 1.0 + energyFill * 1.5 + (stored > 5000 ? 1.0 : 0); // 能量越富余越狂升
+      w.upgrade = 1.0 + energyFill * 1.5 + (stored > 5000 ? 1.0 : 0) + downgradeBoost;
     }
 
-    // —— 能量紧张（孵化都吃力）→ fill 升高保孵化 ——
-    w.fill = 1.0 + (1 - energyFill) * 1.0; // 越缺能量越优先回填 spawn/ext
+    // ============ 前瞻 4：能量趋势预测（会不会饿死）============
+    // 用净流入速率预测：若速率为负且当前不满，提前抬 fill/harvest 而非等空了才救
+    const eRate = b._eRate || 0;
+    if (eRate < -0.5 && energyFill < 0.8) {
+      const starve = ramp(-eRate, 0, 10) * (1 - energyFill); // 流出越快+越空 → 越紧急
+      w.fill += starve * 1.5;
+      w.harvest += starve * 0.6; // 顺带催采集补源头
+    }
+    // 静态缺能量保孵化（保底，v1 逻辑保留）
+    w.fill += (1 - energyFill) * 0.8;
 
-    // —— 维修：建筑受损多时升高（这里粗略用 RCL≥3 有 tower 后稍升）——
+    // ============ 维修：RCL≥3 有 tower 后稍升 ============
     w.repair = rcl >= 3 ? 1.0 : 0.6;
+
+    // 记录诊断（供你在控制台看大脑"在想什么"）
+    b._diag = {
+      t: Game.time, rcl, nSites, remainWork,
+      eRate: Math.round(eRate * 10) / 10,
+      hostiles: hostiles.length, downgradeBoost: Math.round(downgradeBoost * 100) / 100,
+    };
+
+    // ============ L4 规划层调制：planner 选主目标 → 乘性调制权重 ============
+    // brain 算出"看当下+前瞻"的权重后，planner 用"远见/计划"再做一次顶层调制。
+    // 防御红线不被规划覆盖（生存/安全优先级最高，单独保护）。
+    const savedDefend = w.defend;
+    const { bias, goalId, planText } = planner.plan(room, b);
+    for (const type in bias) {
+      if (w[type] !== undefined) w[type] *= bias[type];
+    }
+    w.defend = Math.max(w.defend, savedDefend); // 防御不被规划削弱
+    b._diag.goal = goalId;
+    b._diag.plan = planText;
+
+    // ============ L5 自适应反馈：主目标乏力时疏通经济命脉 ============
+    // adaptive 检测到如“冲级却进度不涨”→ 多半是采集/运输链断，提升 harvest/haul 疏通
+    const stale = adaptive.stalenessBoost(b);
+    if (stale > 0) {
+      w.harvest += stale * 0.8;
+      w.haul += stale * 0.8;
+      b._diag.stale = Math.round(stale * 100) / 100;
+    }
 
     return w;
   },

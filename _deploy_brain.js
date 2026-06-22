@@ -14,7 +14,8 @@ const DIR = path.join(__dirname);
 // 要上传的模块（basename 去 .js = 模块名）
 const FILES = [
   'brain.js', 'blackboard.js', 'market.js', 'utility.js',
-  'executor.js', 'spawning.js', 'utils.js', 'source.scheduler.js',
+  'executor.js', 'spawning.js', 'planner.js', 'adaptive.js',
+  'utils.js', 'source.scheduler.js',
 ];
 
 function api(p, method, bodyObj) {
