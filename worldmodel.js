@@ -25,9 +25,20 @@ const CARRY_CAPACITY = 50;
 const SOURCE_REGEN_RATE = 10; // 一个 owned source 稳态最大产出 energy/tick (3000/300)
 const UPGRADE_POWER = 1;      // 每 WORK 每 tick 升级处理 1 能量
 const BUILD_POWER = 5;        // 每 WORK 每 tick 建造处理 5 能量
+const REPAIR_POWER = 100;     // 每 WORK 每 tick 修复 100 hits
+const CREEP_LIFE = 1500;      // creep 寿命 (claim creep 600)
+const SPAWN_TIME_PER_PART = 3;// 每个身体部件孵化耗 3 tick
+const CONTAINER_DECAY = 5000; // container 每 100 tick 衰减 5000 hits(无人修会消失)
+const ROAD_DECAY_PER_USE = 1; // 路被踩一次衰 1(换取移动加速)
+const PART_COST = { work: 100, carry: 50, move: 50, attack: 80, ranged_attack: 150, heal: 250, tough: 10, claim: 600 };
+// 地形移动成本（tick/格，满足 MOVE 时）
+const TERRAIN_COST = { plain: 1, swamp: 5, road: 0.5 };
+// RCL 升级所需 controller progress
+const RCL_PROGRESS = { 1: 200, 2: 45000, 3: 135000, 4: 405000, 5: 1215000, 6: 3645000, 7: 10935000, 8: 0 };
 
 module.exports = {
   HARVEST_POWER, CARRY_CAPACITY, SOURCE_REGEN_RATE, UPGRADE_POWER, BUILD_POWER,
+  REPAIR_POWER, CREEP_LIFE, SPAWN_TIME_PER_PART, PART_COST, TERRAIN_COST, RCL_PROGRESS,
 
   /** creep 各部件计数（缓存到 memory 避免每 tick 重算） */
   parts(creep) {
@@ -156,5 +167,88 @@ module.exports = {
     const haulNeed = Math.max(1, Math.ceil(harvestRate / Math.max(0.1, haulerThroughput)));
     const haulHave = myCreeps.filter((c) => { const p = this.parts(c); return p.carry > 0 && p.work === 0; }).length;
     return { harvestRate, haulNeed, haulHave, balance: haulHave - haulNeed, avgDist: Math.round(avgDist) };
+  },
+
+  // ================= 扩充：更多世界机制理解 =================
+
+  /** 身体造价（能量）与孵化耗时。理解"造一个大号多贵、多久"。 */
+  bodyCost(body) { return body.reduce((s, p) => s + (PART_COST[p] || PART_COST[p.type] || 0), 0); },
+  spawnTime(body) { return body.length * SPAWN_TIME_PER_PART; },
+
+  /**
+   * ⭐ 回本分析：一个 creep 一生能产出多少能量 vs 造价。
+   * 理解"这个大号值不值得造"——ROI = 一生产出 / 造价。
+   * 越高越划算。静态矿工 ROI 极高(一生几万能量 vs 造价几百)。
+   */
+  lifetimeROI(body, energyPerTick) {
+    const cost = this.bodyCost(body);
+    const lifeProduce = energyPerTick * (CREEP_LIFE - this.spawnTime(body));
+    return cost > 0 ? lifeProduce / cost : 0;
+  },
+
+  /**
+   * ⭐ 静态采矿的经济学论证（为什么该修路+用 container）：
+   *  - container 缓冲：矿工采的能量暂存 container，矿工不必等 Hauler→100%利用
+   *  - 道路：Hauler 走路上移动成本减半(1→0.5 tick/格)→同样 Hauler 运力翻倍
+   * 返回修路后需要几个 Hauler（现状 vs 修路后），量化修路收益。
+   */
+  roadSavings(room) {
+    const flow = this.economyFlow(room);
+    // 修路后移动提速约 2x → Hauler 运力翻倍 → 所需 Hauler 减半
+    const haulNeedWithRoads = Math.max(1, Math.ceil(flow.haulNeed / 2));
+    return { now: flow.haulNeed, withRoads: haulNeedWithRoads, saved: flow.haulNeed - haulNeedWithRoads };
+  },
+
+  /**
+   * ⭐ link 机制理解：link 能量瞬移(距离无关)，损耗 3%。
+   * 理解 RCL5+ 建 link 后可几乎废掉 controller 方向的 Hauler。
+   * @return link 能替代几个 Hauler 的运力
+   */
+  linkValue(room, fromPos, toPos) {
+    const dist = fromPos && toPos ? Math.max(Math.abs(fromPos.x - toPos.x), Math.abs(fromPos.y - toPos.y)) : 20;
+    // link 传 800/tick效果(冷却后)，等效于一个走 dist 的 Hauler 队列
+    const haulerEquiv = (6 * CARRY_CAPACITY) / Math.max(1, dist * 2);
+    return { distSaved: dist, energyLossPct: 3, haulerEquiv: Math.round(haulerEquiv * 10) / 10 };
+  },
+
+  /**
+   * ⭐ controller 降级物理：不升级 controller 会 ticksToDowngrade 递减，到 0 掊 RCL。
+   * 维持不降只需很少 upgrade(1 WORK 偶尔点一下)，但掊级损失巨大。
+   * @return 维持不降级所需的最低 upgrade 速率(energy/tick)
+   */
+  downgradeMaintenance(rcl) {
+    // 每次 upgradeController 重置 ticksToDowngrade。维持成本极低，近乎 0。
+    return 0.1; // 象征值：维持不降几乎免费，但不能不做
+  },
+
+  /**
+   * ⭐ 孵化经济：spawn 每 tick 只能孵 1 个部件。理解"人口增长有速率上限"。
+   * 单 spawn 最大产能 = 持续孵化，但能量供应跟不上会搂。
+   * @return 在给定能量产出下，spawn 是否是瓶颈
+   */
+  spawnBottleneck(room, energyRate) {
+    const spawns = room.find(FIND_MY_SPAWNS).length;
+    // 单 spawn 持续孵化中等体(8部件=24tick)约消耗 ~22 e/tick 能量产能
+    const spawnEnergyAppetite = spawns * 22;
+    return { spawns, canConsume: spawnEnergyAppetite, surplus: energyRate - spawnEnergyAppetite };
+  },
+
+  /**
+   * ⭐ 能量去向决策：给定当前产出，能量该流向哪(孵化/升级/建造/囤积)？
+   * 这是大脑对"能量是血液"的理解。
+   */
+  energyAllocation(room) {
+    const flow = this.economyFlow(room);
+    const sites = room.find(FIND_MY_CONSTRUCTION_SITES).length;
+    const storage = room.storage;
+    const ctrl = room.controller;
+    return {
+      harvestRate: flow.harvestRate,
+      // 优先级: 孵化命脉 > 防降级 > 建造 > 升级 > 囤积storage
+      needFill: room.energyAvailable < room.energyCapacityAvailable,
+      needBuild: sites > 0,
+      needUpgrade: ctrl && ctrl.ticksToDowngrade && ctrl.ticksToDowngrade < 3000,
+      canStockpile: !!storage && room.energyAvailable >= room.energyCapacityAvailable,
+    };
   },
 };
