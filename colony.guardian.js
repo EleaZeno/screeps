@@ -110,15 +110,21 @@ module.exports = {
     }
 
     // 2. 强制孵化采集者（能量阶梯兜底，永不团灭）
+    // 【关键】求生体必须含 CARRY！无 CARRY 的 [WORK,MOVE] 采了能量也运不走=白采。
+    // 能量不足 200 时不勉强出残缺体，而是等 spawn 自动回血到 200（每 tick +1）。
     if (spawn && !spawn.spawning) {
       let body = null;
-      if (avail >= 550) body = [WORK, WORK, WORK, CARRY, CARRY, MOVE, MOVE, MOVE];
+      if (avail >= 800) body = [WORK, WORK, WORK, WORK, CARRY, CARRY, MOVE, MOVE, MOVE, MOVE];
+      else if (avail >= 550) body = [WORK, WORK, WORK, CARRY, CARRY, MOVE, MOVE, MOVE];
       else if (avail >= 300) body = [WORK, WORK, CARRY, MOVE, MOVE];
-      else if (avail >= 200) body = [WORK, CARRY, MOVE];
-      else if (avail >= 150) body = [WORK, MOVE]; // 极限求生：能采能动
+      else if (avail >= 200) body = [WORK, CARRY, MOVE]; // 最小可用采集体（含 CARRY，能采能运）
+      // avail < 200：出不起任何含 CARRY 的体→等 spawn 回血（别出无 CARRY 的垃圾体）
       if (body) {
         const res = spawn.spawnCreep(body, 'SOS_' + Game.time, { memory: { role: 'harvester', room: room.name } });
         if (res === OK) console.log(`🛡️ [GUARDIAN] 求生：强制孵化采集者 body=${body.length}部件 energy=${avail}`);
+      } else if (avail < 200) {
+        // 最危险：能量<200连最小采集体都出不起，只能等回血。打印警告让人可见。
+        if (Game.time % 10 === 0) console.log(`⚠️ [GUARDIAN] 极危：能量${avail}<200出不起采集者，等 spawn 回血中（每 tick+1）`);
       }
     }
   },
