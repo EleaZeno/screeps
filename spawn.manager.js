@@ -10,6 +10,7 @@
  */
 const config = require('config');
 const sourceManager = require('source.manager');
+const scheduler = require('source.scheduler');
 
 module.exports = {
   run(room) {
