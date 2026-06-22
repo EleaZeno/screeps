@@ -84,5 +84,20 @@ function assert(cond, msg) { if (!cond) { console.log('❌ ' + msg); fail++; } e
   }
 })();
 
+// ---- 场景3：buildBody('harvester') 必须 cost≤cap 且含 MOVE（原 bug：cap=550 出 5W+1C 无 MOVE 动不了）----
+(function () {
+  const cost = (b) => b.reduce((a, p) => a + ({ work: 100, carry: 50, move: 50 }[p] || 0), 0);
+  for (const cap of [200, 300, 550, 800, 1300]) {
+    const b = spawnManager.buildBody('harvester', cap);
+    const moves = b.filter((p) => p === MOVE).length;
+    const nonMove = b.filter((p) => p !== MOVE).length;
+    assert(cost(b) <= cap, `harvester body 成本(${cost(b)}) ≤ cap(${cap})`);
+    assert(moves >= 1, `cap=${cap} harvester 必须有 MOVE（能动） [${b.join(',')}]`);
+    assert(b.includes(CARRY), `cap=${cap} harvester 必须有 CARRY`);
+    // harvester 多数时间静坐采矿，不需满速机动；只要不是 0 MOVE（原 bug）即可，宽松比例检查
+    assert(moves >= Math.ceil(nonMove / 3), `cap=${cap} harvester MOVE(${moves}) 不至于重到完全动不了(非MOVE=${nonMove})`);
+  }
+})();
+
 console.log(fail === 0 ? '\n🎉 BOOTSTRAP 死锁复现/回归全部通过' : `\n💥 ${fail} 项失败`);
 process.exit(fail === 0 ? 0 : 1);

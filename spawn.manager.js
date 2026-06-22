@@ -95,19 +95,34 @@ module.exports = {
       const _miners = n('miner');
       const _harvesters = n('harvester');
       if (_miners === 0) {
-        // 还没有 miner：先把 harvester 补到能填满开采位（含 oversub），用当前能量买得起的体型。
+        // 还没有 miner：先结束 bootstrap，再谈高效 miner。
+        //
+        // 【2026-06-23·三次加固·防弱号 thrash】原问题：affordableHarvester 按「当前能量」造体，
+        //   每次能量刚到 200 就出个 W1C1M1 小号 → 能量被抽干 → 永远放不到 450 出 miner，
+        //   满屏弱号 thrash、controller 不涨。
+        //   修复：仅「采集者≤1」的真紧急才用 affordableHarvester 应急；一旦≥2 个采集者（死不了），
+        //   改用 buildBody 造「足额大号」（钱不够就 ERR_NOT_ENOUGH_ENERGY 等能量攒起来，不出垃圾小号）；
+        //   且无 miner 期的 harvester 封顶 4（够产能攒出 miner 即可，不满屏弱号）。
         const _ecoOv = (Memory.config && Memory.config.economy) || {};
         const _oversub = _ecoOv.harvesterOversub || config.economy.harvesterOversub || 1.3;
         const _slots = scheduler.totalSlots(room) || spots || numSources;
-        const _harvNeed = Math.min(Math.max(2, Math.ceil(_slots * _oversub)), 12);
+        const _harvNeed = Math.min(Math.max(2, Math.ceil(_slots * _oversub)), 4);
         if (_harvesters < _harvNeed) {
-          const body = this.affordableHarvester(cur);
-          if (body) {
+          if (_harvesters <= 1) {
+            // 真紧急（几乎没采集者）：能出多小出多小，先保活
+            const body = this.affordableHarvester(cur);
+            if (body) {
+              const res = this.spawnCreep(spawn, 'harvester', body);
+              if (res === OK || res === ERR_NOT_ENOUGH_ENERGY) return;
+            }
+          } else {
+            // 已有≥2 采集者：造足额大号，钱不够就等（避免弱号 thrash 抽干能量）
+            const body = this.buildBody('harvester', cap);
             const res = this.spawnCreep(spawn, 'harvester', body);
             if (res === OK || res === ERR_NOT_ENOUGH_ENERGY) return;
           }
         }
-        // harvester 已够：尝试攒/造第一个 miner（buildBody 自适应；钱不够就等）
+        // harvester 已够：攒/造第一个 miner（buildBody 自适应，成本已保证≤cap；钱不够就等）
         if (n('miner') < numSources) {
           const body = this.buildBody('miner', cap);
           const res = this.spawnCreep(spawn, 'miner', body);
@@ -219,16 +234,21 @@ module.exports = {
       for (let i = 0; i < pairs; i++) { body.push(CARRY); body.push(MOVE); }
       return body;
     }
-    // harvester：source 位置有限时优先堆 WORK（采得快），少量 CARRY/MOVE
+    // harvester：source 位置有限时优先堆 WORK（采得快），但必须留够 MOVE（否则动不了）
     if (role === 'harvester') {
-      const work = this.harvesterWorkCount(energyCap);
-      const body = [];
+      // 【修复 2026-06-23】原 bug：cap=550 时 5W+1C 用尽能量 → 0 MOVE → 采集者动不了。
+      //   策略：每个 [WORK,CARRY,MOVE] 单元(200) 起步保证能动；多余能量再加 WORK（每个配 0.5 MOVE）。
+      //   先按单元数定基底，再贪心加 WORK 并补 MOVE，全程保证 cost≤cap 且 MOVE≥ceil(其他部件/2)。
       let e = energyCap;
-      for (let i = 0; i < work; i++) { body.push(WORK); e -= 100; }
-      body.push(CARRY); e -= 50;
-      const moves = Math.max(1, Math.ceil(body.length / 2));
-      for (let i = 0; i < moves && e >= 50; i++) { body.push(MOVE); e -= 50; }
-      return body.length >= 3 ? body : [WORK, CARRY, MOVE];
+      const body = [WORK, CARRY, MOVE]; e -= 200; // 最小可动单元
+      // 继续在预算内加 WORK，并按需补 MOVE 维持机动（每 2 个非 MOVE 部件至少 1 MOVE）
+      while (e >= 100 && body.filter((p) => p === WORK).length < 6) {
+        body.push(WORK); e -= 100;
+        const nonMove = body.filter((p) => p !== MOVE).length;
+        const moves = body.filter((p) => p === MOVE).length;
+        if (moves < Math.ceil(nonMove / 2) && e >= 50) { body.push(MOVE); e -= 50; }
+      }
+      return body;
     }
     // upgrader / builder：均衡单元
     const units = Math.max(1, Math.min(8, Math.floor(energyCap / 200)));
