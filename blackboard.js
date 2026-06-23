@@ -128,13 +128,26 @@ module.exports = {
     const downgradeUrgency = ctrl.ticksToDowngrade
       ? Math.max(0, 1 - ctrl.ticksToDowngrade / 5000) * 60
       : 0;
+    // 【世界模型驱动容量】升级人数受能量供给约束：一个 1-WORK upgrader 消耗 1 e/tick，
+    // 能量产出 harvestRate(减去孵化/填充消耗)才能养几个 upgrader。
+    // 这是分工流水线的关键：升级人数不能超过能量能养的，否则大家抢着升级没人采矿。
+    let upCap = 4; // 默认
+    try {
+      const wm = require('worldmodel');
+      const flow = wm.economyFlow(room);
+      // 能量产出的 ~60% 可用于升级(其余给孵化/填充)，每 upgrader 按 2 WORK 估=2 e/tick
+      const upBudget = flow.harvestRate * 0.6;
+      upCap = Math.max(1, Math.min(8, Math.round(upBudget / 2)));
+      // 防降级紧急时至少保 1 个
+      if (downgradeUrgency > 0) upCap = Math.max(1, upCap);
+    } catch (e) { /* fallback */ }
     tasks.push({
       id: `upgrade:${ctrl.id}`,
       type: 'upgrade',
       targetId: ctrl.id,
       pos: { x: ctrl.pos.x, y: ctrl.pos.y, roomName: room.name },
       baseValue: 40 + downgradeUrgency,
-      capacity: 6, // 多人可同时升级
+      capacity: upCap, // 世界模型：能量供得起几个升级者
       meta: {},
     });
   },

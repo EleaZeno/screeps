@@ -118,6 +118,15 @@ module.exports = {
         if (store) { if (utils.work(creep, 'transfer', store, RESOURCE_ENERGY) === ERR_NOT_IN_RANGE) utils.moveTo(creep, store, '#ffffff'); return; }
         return;
       }
+      // 空载待命：去 source 旁 container 接货，按名字哈希分散到不同 source(不挤一处)
+      const srcs = creep.room.find(FIND_SOURCES);
+      if (srcs.length) {
+        const pick = srcs[creep.name.charCodeAt(creep.name.length - 1) % srcs.length];
+        const cont = pick.pos.findInRange(FIND_STRUCTURES, 1, { filter: (s) => s.structureType === STRUCTURE_CONTAINER })[0];
+        const dst = cont || pick;
+        if (!creep.pos.inRangeTo(dst, 2)) utils.moveTo(creep, dst, '#888888');
+        return;
+      }
       utils.gatherEnergy(creep);
       return;
     }

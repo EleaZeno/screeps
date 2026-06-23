@@ -155,6 +155,16 @@ module.exports = {
       b._diag.stale = Math.round(stale * 100) / 100;
     }
 
+    // ============ ⭐ 分工流水线保护：采集/运输是"挖金"，升级/建造是"花钱" ============
+    // 核心原则：花钱的优先级绝不能碌压挖金的，否则大家抢着升级、没人采矿喚 container
+    // (这正是用户看到的"不分工、自采自用"的根因)。保证采集权重不低于升级。
+    // 例外：防降级紧急(downgradeBoost大)时允许升级临时超过。
+    if (downgradeBoost < 1.0) {
+      const harvestFloor = w.harvest;       // 采集是流水线源头，作为地板
+      w.upgrade = Math.min(w.upgrade, harvestFloor * 1.5); // 升级最多是采集的 1.5 倍
+      w.build = Math.min(w.build, harvestFloor * 1.5);
+    }
+
     return w;
   },
 };
