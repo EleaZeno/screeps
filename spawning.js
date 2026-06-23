@@ -54,7 +54,22 @@ module.exports = {
       const wm = require('worldmodel');
       const flow = wm.economyFlow(room);
       if (flow.harvestStarved) {
-        topType = 'harvest'; // 源头瓶颈，压倒一切先补采集
+        // ⭐ 修复(2026-06-23 矿工失控): source 堆积 ≠ 缺矿工。
+        // source 堆积可能是(a)采集槽没坐满(真缺矿工) 或 (b)槽坐满但没 hauler 搬走(缺 Carrier)。
+        // 只有(a)才该造矿工; (b)该造 Carrier。否则会失控刷重 WORK 矿工体去干 build/upgrade(极低效)。
+        let scheduler; try { scheduler = require('source.scheduler'); } catch (e) { scheduler = null; }
+        // 在岗矿工数(有 WORK、在采集槽上)
+        const minersOnSlot = room.find(FIND_MY_CREEPS, {
+          filter: (c) => { const p = wm.parts(c); return p.work > 0 && c.memory && c.memory.taskType === 'harvest'; },
+        }).length;
+        // 采集槽总数(受 maxPerSource=2 限制, 与 blackboard 一致): 2 × source 数
+        const harvestSlots = 2 * room.find(FIND_SOURCES).length;
+        if (minersOnSlot < harvestSlots) {
+          topType = 'harvest'; // 槽没坐满 = 真缺矿工, 补
+        } else {
+          // 槽已坐满但源还堆积 = hauler 不足, 造 Carrier 搬走
+          topType = (shortage.haul || shortage.fill) ? (shortage.haul ? 'haul' : 'fill') : 'haul';
+        }
       } else if ((topType === 'haul' || topType === 'fill') && flow.haulHave >= flow.haulNeed) {
         // 运力已足。haul/fill 任务的 capacity 随 container 囤量膨胀(可达 80+)，
         // 会霸占 shortage 排名第一；若此时直接 return，则真实存在的 upgrade/build 缺口

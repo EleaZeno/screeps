@@ -60,12 +60,25 @@ module.exports = {
     EVAL_TICKS = EVAL_TICKS || 300;
     const G = brainMem.genome || (this.current(brainMem), brainMem.genome);
     const ctrl = room.controller;
-    const prog = ctrl ? (ctrl.level * 1e7 + (ctrl.progress || 0)) : 0;
+    // ⭐ 适应度信号修复(2026-06-23): 不再用 level*1e7 + progress。
+    // 原公式在 RCL 升级瞬间 prog 暴跳 1e7, 造成 fitness 假峰(33000)/假谷(-16000),
+    // 把真实的微小增速(0.07)当噪声淹没 => 进化 30 代原地踏步。
+    // 改为: 只用同级 progress 增量作适应度; 跨级的评估窗口作废(不参与比较)。
+    const level = ctrl ? ctrl.level : 0;
+    const prog = ctrl ? (ctrl.progress || 0) : 0;
 
-    if (G.baselineProg === null) { G.baselineProg = prog; G.evalStart = Game.time; return; }
+    if (G.baselineProg === null) { G.baselineProg = prog; G.baselineLevel = level; G.evalStart = Game.time; return; }
     if (Game.time - G.evalStart < EVAL_TICKS) return;
 
-    // —— 评估：这段时间的真实产出增速 ——
+    // ⭐ 跨级作废: 评估窗口内 RCL 变了 => progress 被重置/换算, 增量不可比, 跳过本次。
+    if (level !== G.baselineLevel) {
+      G.baselineProg = prog; G.baselineLevel = level; G.evalStart = Game.time;
+      G.history = (G.history || []).slice(-9);
+      G.history.push({ gen: G.gen, fitness: null, kept: false, skipped: 'levelup' });
+      return;
+    }
+
+    // —— 评估：这段时间的真实同级 progress 增速 ——
     const dt = Game.time - G.evalStart;
     const fitness = (prog - G.baselineProg) / dt; // progress/tick，越高越好
 
@@ -75,6 +88,12 @@ module.exports = {
       G.champion = this._clone(G.genes);
       G.history = [{ gen: G.gen, fitness: Math.round(fitness * 100) / 100, kept: true }];
     } else {
+      // ⭐ 一次性迁移(2026-06-23): 旧 fitness 含 level*1e7 污染, best.fitness 可能是 33000 这种假高分。
+      // 干净信号下低 RCL 的 progress/tick 不可能超 1000。检到污染值则重置 champion 基线。
+      if (G.best.fitness > 1000) {
+        G.best = { genes: this._clone(G.genes), fitness };
+        G.champion = this._clone(G.genes);
+      }
       // 当前是挑战者：和 champion 比
       const improved = fitness > G.best.fitness * 1.02; // 需真涨 >2% 才算赢（抗噪声）
       if (improved) {
@@ -92,6 +111,7 @@ module.exports = {
     G.genes = this._mutate(this._clone(G.champion));
     G.gen += 1;
     G.baselineProg = prog;
+    G.baselineLevel = level;
     G.evalStart = Game.time;
     G.lastFitness = Math.round(fitness * 100) / 100;
   },
