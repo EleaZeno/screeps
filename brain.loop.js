@@ -29,12 +29,28 @@ let buildPlanner, layoutPlanner;
 try { buildPlanner = require('build.planner'); } catch (e) { buildPlanner = null; }
 try { layoutPlanner = require('layout.planner'); } catch (e) { layoutPlanner = null; }
 
+// —— Memory 自净：清理调试残留的 __xxx 顶层临时键 ——
+// 控制台调试/autopilot 会往 Memory 写一次性 __probe/__diag/__autopilot 等 scratch 键，
+// 不会自清，长期累积成几十 KB 死垃圾 -> 每 tick 序列化都白烧 CPU。
+// 约定：顶层以 '__' 开头的键一律视为临时调试键，任何线上模块都不读写它们（已核验）。
+// 每 100 tick 扫一次（CPU 可忽略），只删 Memory 顶层 __ 键，绝不碰 creeps/brain/intel/config 等正式键。
+function _pruneScratch() {
+  let n = 0;
+  for (const k in Memory) {
+    if (k.length >= 2 && k[0] === '_' && k[1] === '_') { delete Memory[k]; n++; }
+  }
+  if (n > 0) console.log(`🧹 Memory 自净: 清理 ${n} 个调试残留 __ 键`);
+  return n;
+}
+
 module.exports.loop = function () {
   const _cpuStart = (typeof Game !== 'undefined' && Game.cpu && Game.cpu.getUsed) ? Game.cpu.getUsed() : 0;
   // 清理死 creep 内存
   for (const name in Memory.creeps) {
     if (!Game.creeps[name]) delete Memory.creeps[name];
   }
+  // Memory 自净（每 100 tick，低频低耗）
+  if (Game.time % 100 === 0) { try { _pruneScratch(); } catch (e) { /* 自净失败不影响主逻辑 */ } }
 
   for (const roomName in Game.rooms) {
     const room = Game.rooms[roomName];
