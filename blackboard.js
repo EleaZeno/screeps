@@ -173,22 +173,26 @@ module.exports = {
     }
   },
 
-  /** 维修任务：受损建筑（非墙优先）= repair 任务。 */
+  /** 维修任务：受损建筑（非墙优先）= repair 任务。
+   *  container 是静态分工命脉且衰减快，提前到 80% 就修且价值更高（丢了分工就垮）。 */
   _collectRepair(room, tasks) {
     const damaged = room.find(FIND_STRUCTURES, {
-      filter: (s) =>
-        s.hits < s.hitsMax * 0.6 &&
-        s.structureType !== STRUCTURE_WALL &&
-        s.structureType !== STRUCTURE_RAMPART,
+      filter: (s) => {
+        if (s.structureType === STRUCTURE_WALL || s.structureType === STRUCTURE_RAMPART) return false;
+        // container 提前到 80%（衰减快，别等快没了才修）；其他 60%
+        const thresh = s.structureType === STRUCTURE_CONTAINER ? 0.8 : 0.6;
+        return s.hits < s.hitsMax * thresh;
+      },
     });
     for (const s of damaged) {
       const dmgRatio = 1 - s.hits / s.hitsMax;
+      const isContainer = s.structureType === STRUCTURE_CONTAINER;
       tasks.push({
         id: `repair:${s.id}`,
         type: 'repair',
         targetId: s.id,
         pos: { x: s.pos.x, y: s.pos.y, roomName: room.name },
-        baseValue: 30 + dmgRatio * 40,
+        baseValue: (isContainer ? 55 : 30) + dmgRatio * 40, // container 基础价更高
         capacity: 1,
         meta: {},
       });

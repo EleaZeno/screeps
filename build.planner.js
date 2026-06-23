@@ -98,16 +98,33 @@ module.exports = {
   },
 
   planContainers(room) {
-    const sources = room.find(FIND_SOURCES);
-    for (const source of sources) {
-      const near = source.pos.findInRange(FIND_STRUCTURES, 1, { filter: (s) => s.structureType === STRUCTURE_CONTAINER });
-      const nearSites = source.pos.findInRange(FIND_CONSTRUCTION_SITES, 1, { filter: (s) => s.structureType === STRUCTURE_CONTAINER });
-      if (near.length === 0 && nearSites.length === 0) this.placeAround(room, source.pos, STRUCTURE_CONTAINER, 1, 1);
+    // 【世界模型对齐】容器建在【开采格】上，让矿工站上去采矿能量直接掉进 container=静态采矿成立。
+    // RCL2 可建 5 个(container 不分RCL，每房上限5)：每 source 取最近spawn的2个开采格 + controller旁1个。
+    const MAX = 5;
+    const have = this.countStructAndSites(room, STRUCTURE_CONTAINER);
+    if (have >= MAX) return;
+    let budget = MAX - have;
+    const slots = (room.memory.slots && room.memory.slots.bySource) || {};
+    // 每个 source 在其最近的2个开采格上建 container
+    for (const sid in slots) {
+      if (budget <= 0) break;
+      const list = slots[sid].slice().sort((a, b) => (a.dist || 0) - (b.dist || 0)).slice(0, 2);
+      for (const slot of list) {
+        if (budget <= 0) break;
+        const pos = new RoomPosition(slot.x, slot.y, room.name);
+        const here = pos.lookFor(LOOK_STRUCTURES).concat(pos.lookFor(LOOK_CONSTRUCTION_SITES));
+        if (here.some((s) => s.structureType === STRUCTURE_CONTAINER)) continue; // 已有
+        if (here.length > 0) continue; // 该格被其他占
+        if (room.createConstructionSite(slot.x, slot.y, STRUCTURE_CONTAINER) === OK) { budget--; console.log(`[BUILD] container @开采格 ${slot.x},${slot.y}`); }
+      }
     }
+    // controller 旁建 1 个(升级者从此取能)
     const ctrl = room.controller;
-    const cNear = ctrl.pos.findInRange(FIND_STRUCTURES, 2, { filter: (s) => s.structureType === STRUCTURE_CONTAINER });
-    const cNearSites = ctrl.pos.findInRange(FIND_CONSTRUCTION_SITES, 2, { filter: (s) => s.structureType === STRUCTURE_CONTAINER });
-    if (cNear.length === 0 && cNearSites.length === 0) this.placeAround(room, ctrl.pos, STRUCTURE_CONTAINER, 1, 2);
+    if (budget > 0 && ctrl) {
+      const cNear = ctrl.pos.findInRange(FIND_STRUCTURES, 2, { filter: (s) => s.structureType === STRUCTURE_CONTAINER });
+      const cNearSites = ctrl.pos.findInRange(FIND_CONSTRUCTION_SITES, 2, { filter: (s) => s.structureType === STRUCTURE_CONTAINER });
+      if (cNear.length === 0 && cNearSites.length === 0) this.placeAround(room, ctrl.pos, STRUCTURE_CONTAINER, 1, 2);
+    }
   },
 
   /** link：优先 controller 旁、storage 旁、各 source 旁，每处 1 个，总数不超 target */
