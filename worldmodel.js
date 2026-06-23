@@ -213,6 +213,56 @@ module.exports = {
   },
 
   /**
+   * ⭐ 修路 ROI 判据（"划不划算"的数学）—— 教 brain 自己算。
+   * 成本：1 段路 = 建造 300 能量 + 维护(路衰减需 repair，约 0.05 e/tick)。
+   * 收益：路上移动疲劳减半→有 MOVE 的体平原 2→1 tick/格，沼泽 10→2。每趟省的 tick × 经过频率。
+   * 划算判据：一段路被走得越频繁越划算。回本越快越值。
+   * @param trafficPerTile 该格平均多少 tick 被踩一次(越小越频繁); terrain 'plain'|'swamp'
+   * @return { worth, paybackTicks, savePerTick }
+   */
+  roadROI(trafficPerTile, terrain) {
+    const BUILD = 300;                   // 1 格路建造成本
+    const decayMaint = 0.05;             // 路衰减~5000hits/1000tick, repair 维护粗估 0.05 e/tick
+    const savePerPass = terrain === 'swamp' ? 8 : 1;   // 沼泽 10→2 省8; 平原 2→1 省1
+    const passesPerTick = 1 / Math.max(1, trafficPerTile);
+    const savePerTick = passesPerTick * savePerPass;
+    const netPerTick = savePerTick - decayMaint;
+    const paybackTicks = netPerTick > 0 ? BUILD / netPerTick : Infinity;
+    // 划算 = 净收益为正 且 能在合理时间(<8000tick)回本
+    return { worth: netPerTick > 0 && paybackTicks < 8000, paybackTicks: Math.round(paybackTicks), savePerTick: Math.round(savePerTick * 100) / 100, terrain };
+  },
+
+  /**
+   * ⭐ 道路布局规划（交给 brain 决定在哪修路）。
+   * 高交通路径 = spawn↔每 source、spawn↔controller。这些路被 Hauler/Upgrader 反复走。
+   * 用 roadROI 逐段判是否该修。返回推荐修路坐标列表。
+   * @return { segments:[{x,y,terrain,payback}], count }
+   */
+  planRoads(room) {
+    const spawn = room.find(FIND_MY_SPAWNS)[0];
+    if (!spawn) return { segments: [], count: 0 };
+    const sources = room.find(FIND_SOURCES);
+    const ctrl = room.controller;
+    const terrain = new Room.Terrain(room.name);
+    const targets = [];
+    for (const s of sources) targets.push({ pos: s.pos, traffic: 6 });  // source路: Hauler频繁
+    if (ctrl) targets.push({ pos: ctrl.pos, traffic: 10 });             // controller路: Upgrader
+    const segments = [];
+    const seen = {};
+    for (const t of targets) {
+      const path = spawn.pos.findPathTo(t.pos, { ignoreCreeps: true, swampCost: 5 });
+      for (const step of path) {
+        const key = step.x + ',' + step.y;
+        if (seen[key]) continue; seen[key] = 1;
+        const terr = (terrain.get(step.x, step.y) & TERRAIN_MASK_SWAMP) ? 'swamp' : 'plain';
+        const roi = this.roadROI(t.traffic, terr);
+        if (roi.worth) segments.push({ x: step.x, y: step.y, terrain: terr, payback: roi.paybackTicks });
+      }
+    }
+    return { segments, count: segments.length };
+  },
+
+  /**
    * ⭐ link 机制理解：link 能量瞬移(距离无关)，损耗 3%。
    * 理解 RCL5+ 建 link 后可几乎废掉 controller 方向的 Hauler。
    * @return link 能替代几个 Hauler 的运力

@@ -39,47 +39,50 @@ module.exports = {
     },
 
     haul(creep, src, utils) {
-      // 取货阶段：从 src（container/掉落/坟墓）取能量
-      if (creep.store.getFreeCapacity(RESOURCE_ENERGY) > 0 && src) {
+      // 装满再走状态机：取能中且未满→继续取；但取不到更多(src空)时不死等，有货就走。
+      const working = module.exports._loaded(creep, utils);
+      if (!working && src) {
         const method = src instanceof Resource ? 'pickup' : 'withdraw';
         const r = src instanceof Resource
           ? utils.work(creep, 'pickup', src)
           : utils.work(creep, 'withdraw', src, RESOURCE_ENERGY);
-        if (r === ERR_NOT_IN_RANGE) utils.moveTo(creep, src, '#ffaa00');
-        return;
+        if (r === ERR_NOT_IN_RANGE) { utils.moveTo(creep, src, '#ffaa00'); return; }
+        // 取不到更多(src空/不足)且已有一些货→提前转送，不死等装满
+        if (r === ERR_NOT_ENOUGH_RESOURCES && creep.store[RESOURCE_ENERGY] > 0) { creep.memory.working = true; }
+        else if (r === ERR_NOT_ENOUGH_RESOURCES) { /* 空载且src空，下tick市场重分 */ return; }
+        else return; // 正常取货中，继续
       }
-      // 满了 → 送去最近的需求点（spawn/ext/tower/storage）
+      // 满了(或提前转送) → 送去最近的需求点
       const drop = utils.findEnergyDropOff(creep);
       if (drop) {
         if (utils.work(creep, 'transfer', drop, RESOURCE_ENERGY) === ERR_NOT_IN_RANGE) utils.moveTo(creep, drop, '#ffffff');
       } else {
-        // 没地方送 → 拿去升级（能量不浪费）
         const ctrl = creep.room.controller;
         if (ctrl && utils.work(creep, 'upgradeController', ctrl) === ERR_NOT_IN_RANGE) utils.moveTo(creep, ctrl, '#66ccff');
       }
     },
 
     fill(creep, struct, utils) {
-      // 空了先去取能，满了去填
-      if (creep.store[RESOURCE_ENERGY] === 0) { module.exports._refill(creep, utils); return; }
+      // 装满再去填（状态机）：没装满且还能取到能→继续取
+      if (!module.exports._loaded(creep, utils)) { module.exports._refill(creep, utils); return; }
       if (!struct) return;
       if (utils.work(creep, 'transfer', struct, RESOURCE_ENERGY) === ERR_NOT_IN_RANGE) utils.moveTo(creep, struct, '#ffffff');
     },
 
     upgrade(creep, ctrl, utils) {
-      if (creep.store[RESOURCE_ENERGY] === 0) { module.exports._refill(creep, utils); return; }
+      if (!module.exports._loaded(creep, utils)) { module.exports._refill(creep, utils); return; }
       if (!ctrl) return;
       if (utils.work(creep, 'upgradeController', ctrl) === ERR_NOT_IN_RANGE) utils.moveTo(creep, ctrl, '#66ccff');
     },
 
     build(creep, site, utils) {
-      if (creep.store[RESOURCE_ENERGY] === 0) { module.exports._refill(creep, utils); return; }
+      if (!module.exports._loaded(creep, utils)) { module.exports._refill(creep, utils); return; }
       if (!site) return;
       if (utils.work(creep, 'build', site) === ERR_NOT_IN_RANGE) utils.moveTo(creep, site, '#88ff88');
     },
 
     repair(creep, struct, utils) {
-      if (creep.store[RESOURCE_ENERGY] === 0) { module.exports._refill(creep, utils); return; }
+      if (!module.exports._loaded(creep, utils)) { module.exports._refill(creep, utils); return; }
       if (!struct) return;
       if (utils.work(creep, 'repair', struct) === ERR_NOT_IN_RANGE) utils.moveTo(creep, struct, '#ffff88');
     },
@@ -97,9 +100,23 @@ module.exports = {
     },
   },
 
+  /** 装载状态机：装满再去干活，用完再去取。返回 true=应该干活(能量就绪), false=该去取能。
+   *  修复“半载就跑”：不再一有能量就跑，而是装满(或取不到更多)才出发。 */
+  _loaded(creep, utils) {
+    const free = creep.store.getFreeCapacity(RESOURCE_ENERGY);
+    const energy = creep.store[RESOURCE_ENERGY];
+    if (creep.memory.working) {
+      // 干活中：用完才切回取能
+      if (energy === 0) { creep.memory.working = false; }
+    } else {
+      // 取能中：装满才切去干活（free===0 即满）
+      if (free === 0) { creep.memory.working = true; }
+    }
+    return !!creep.memory.working;
+  },
+
   /** 通用补能：去最近的能量源取货（给 upgrade/build/fill/repair 用） */
   _refill(creep, utils) {
-    delete creep.memory.working;
     utils.gatherEnergy(creep);
   },
 

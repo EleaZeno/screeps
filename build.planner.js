@@ -54,6 +54,10 @@ module.exports = {
     // ---- 3. container（source 旁 + controller 旁）----
     if (rcl >= 2) this.planContainers(room);
 
+    // ---- 3.5 ⭐ 道路（brain 自主 ROI 决策：算划不划算再修）----
+    // RCL≥3 才修路（早期能量宝贵优先给 extension/container；路是优化不是刚需）
+    if (rcl >= 3) this.planRoads(room);
+
     // ---- 4. storage（RCL4+，单点，放 spawn 旁核心）----
     if (bp.storage) this.ensureSingle(room, spawn.pos, 'storage', 2);
 
@@ -95,6 +99,26 @@ module.exports = {
     if (!type) return;
     if (this.countStructAndSites(room, type) >= 1) return;
     this.placeAround(room, center, type, 1, maxRange || 3);
+  },
+
+  /** ⭐ 自主修路：用 worldmodel.planRoads 的 ROI 判据决定哪些格该铺路。
+   *  每次限铺少量工地(避免一次太多压城)，只在“划算”的格上建。 */
+  planRoads(room) {
+    let wm; try { wm = require('worldmodel'); } catch (e) { return; }
+    const existingRoadSites = room.find(FIND_CONSTRUCTION_SITES, { filter: (s) => s.structureType === STRUCTURE_ROAD }).length;
+    if (existingRoadSites >= 5) return; // 同时最多 5 个路工地，别压城
+    const plan = wm.planRoads(room);
+    let budget = 5 - existingRoadSites;
+    let built = 0;
+    for (const seg of plan.segments) {
+      if (budget <= 0) break;
+      const pos = new RoomPosition(seg.x, seg.y, room.name);
+      const here = pos.lookFor(LOOK_STRUCTURES).concat(pos.lookFor(LOOK_CONSTRUCTION_SITES));
+      if (here.some((s) => s.structureType === STRUCTURE_ROAD)) continue; // 已有路
+      if (here.some((s) => s.structureType !== STRUCTURE_ROAD && s.structureType !== STRUCTURE_RAMPART && s.structureType !== STRUCTURE_CONTAINER)) continue; // 格被其他建筑占
+      if (room.createConstructionSite(seg.x, seg.y, STRUCTURE_ROAD) === OK) { budget--; built++; }
+    }
+    if (built > 0) console.log(`[BUILD] ⭐brain自主修路: ${built}段(ROI划算), 总推荐${plan.count}段`);
   },
 
   planContainers(room) {
