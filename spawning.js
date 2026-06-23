@@ -90,8 +90,33 @@ module.exports = {
     // 能量预算：用 energyCapacityAvailable（满状态），不够就等（返回不造）
     const cap = room.energyCapacityAvailable;
     const cur = room.energyAvailable;
-    const body = this._bodyFor(topType, cap);
-    const cost = this._cost(body);
+    let body = this._bodyFor(topType, cap);
+    let cost = this._cost(body);
+
+    // ⭐ 引导期死锁破除(2026-06-23): 若没有任何能给 spawn/extension 送能量的 creep
+    // (无 CARRY 体在 fill/haul)，spawn 能量永远补不满 → 永远凑不够大 body → 永不孵化
+    // → 人口无法恢复(实测 12→3 崩溃)。此时强制用【当前可用能量】立刻造一个最小搬运体(Filler)，
+    // 打破死锁。这不是 if 嵌套决策，是经济闭环的硬约束: 没有送货员则整条链停摆。
+    const haveFiller = room.find(FIND_MY_CREEPS, {
+      filter: (c) => {
+        let p; try { p = require('worldmodel').parts(c); } catch (e) { p = { carry: 1 }; }
+        const tt = c.memory && c.memory.taskType;
+        return p.carry > 0 && (tt === 'fill' || tt === 'haul' || p.work === 0);
+      },
+    }).length > 0;
+    const spawnNeedsEnergy = spawn.store.getFreeCapacity
+      ? spawn.store.getFreeCapacity(RESOURCE_ENERGY) > 0
+      : (room.energyAvailable < cap);
+    if (!haveFiller && spawnNeedsEnergy && cur < cost) {
+      // 用当前能量能造的最大搬运体(至少 [CARRY,MOVE]=100)，立刻孵化打破死锁
+      const fb = this._haulerBody(Math.max(100, cur));
+      const fbCost = this._cost(fb);
+      if (cur >= fbCost) {
+        spawn.spawnCreep(fb, 'Filler_' + Game.time, { memory: { born: Game.time } });
+      }
+      return;
+    }
+
     if (cur < cost) return; // 攒能量，下 tick 再来（不出垃圾小号）
 
     const name = this._nameFor(topType) + '_' + Game.time;
