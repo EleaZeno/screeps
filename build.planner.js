@@ -54,9 +54,14 @@ module.exports = {
     // ---- 3. container（source 旁 + controller 旁）----
     if (rcl >= 2) this.planContainers(room);
 
-    // ---- 3.5 ⭐ 道路（brain 自主 ROI 决策：算划不划算再修）----
-    // RCL≥3 才修路（早期能量宝贵优先给 extension/container；路是优化不是刚需）
-    if (rcl >= 3) this.planRoads(room);
+    // ---- 3.5 ⭐ 道路 ----
+    // 数据结论(_road_math.py, E9N54 0%沼泽): 极早期全量修路净亏(抽走能量>负重提速),
+    // 但 spawn↔source【主脊】在 RCL2 静态采矿一开始就被 hauler 反复走 => 提前修脊划算。
+    // 故拆两条:
+    //   (a) RCL≥2 且 source container 就位 => 只修 spawn↔source 主脊(高频, ROI正)
+    //   (b) RCL≥3 => 全量 ROI 修路(controller 路 + 其余)
+    if (rcl >= 2) this.planSpineRoads(room);   // 主脊提前
+    if (rcl >= 3) this.planRoads(room);        // 全量(含 controller)
 
     // ---- 4. storage（RCL4+，单点，放 spawn 旁核心）----
     if (bp.storage) this.ensureSingle(room, spawn.pos, 'storage', 2);
@@ -99,6 +104,38 @@ module.exports = {
     if (!type) return;
     if (this.countStructAndSites(room, type) >= 1) return;
     this.placeAround(room, center, type, 1, maxRange || 3);
+  },
+
+  /**
+   * ⭐ 主脊提前修路(RCL2): 只修 spawn↔每个 source 的路。
+   * 触发条件: source container 已就位(静态采矿开始, hauler 开始在脊上高频往返)。
+   * 不等 extension 全建完 —— 这条脊的交通是确定的、立刻发生的, 提前修立即省负重往返 tick。
+   * 保守: 同时最多 3 个脊路工地, 不压城; container 没就位则不修(避免 hauler 还没上线就白修)。
+   */
+  planSpineRoads(room) {
+    // 闸门: source container 必须就位(否则静态采矿/hauler 还没跑, 修路无收益)
+    let infra; try { infra = require('infra'); } catch (e) { infra = null; }
+    if (infra && !infra.containersReady(room)) return;
+    const spawn = room.find(FIND_MY_SPAWNS)[0];
+    if (!spawn) return;
+    const existingRoadSites = room.find(FIND_CONSTRUCTION_SITES, { filter: (s) => s.structureType === STRUCTURE_ROAD }).length;
+    if (existingRoadSites >= 3) return; // 主脊阶段更保守, 最多 3 个工地
+    let budget = 3 - existingRoadSites;
+    let built = 0;
+    const sources = room.find(FIND_SOURCES);
+    for (const src of sources) {
+      if (budget <= 0) break;
+      const path = spawn.pos.findPathTo(src.pos, { ignoreCreeps: true, swampCost: 5, range: 1 });
+      for (const step of path) {
+        if (budget <= 0) break;
+        const pos = new RoomPosition(step.x, step.y, room.name);
+        const here = pos.lookFor(LOOK_STRUCTURES).concat(pos.lookFor(LOOK_CONSTRUCTION_SITES));
+        if (here.some((s) => s.structureType === STRUCTURE_ROAD)) continue; // 已有路
+        if (here.some((s) => s.structureType !== STRUCTURE_ROAD && s.structureType !== STRUCTURE_RAMPART)) continue;
+        if (room.createConstructionSite(step.x, step.y, STRUCTURE_ROAD) === OK) { budget--; built++; }
+      }
+    }
+    if (built > 0) console.log('[BUILD] RCL2 spine road +' + built + ' (spawn<->source)');
   },
 
   /** ⭐ 自主修路：用 worldmodel.planRoads 的 ROI 判据决定哪些格该铺路。
