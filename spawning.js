@@ -48,17 +48,19 @@ module.exports = {
 
     // 【世界模型门控】避免 Hauler 过剩失业：用能量经济流算“需几个 Hauler”。
     // 若市场说缺 haul/fill 但现有纯CARRY体已足够(运力>产出)，则不再造，改造采集提高产出。
-    if ((topType === 'haul' || topType === 'fill')) {
-      try {
-        const wm = require('worldmodel');
-        const flow = wm.economyFlow(room);
-        if (flow.haulHave >= flow.haulNeed) {
-          // 运力已足，真正瓶颈是产出→改造采集者(若 harvest 也缺)，否则不造
-          if (shortage.harvest) topType = 'harvest';
-          else return; // 不造多余 Hauler
-        }
-      } catch (e) { /* worldmodel 不可用时不阻断 */ }
-    }
+    // 【⭐ source 堆积修复】采集是整条经济链的源头瓶颈：source 能量堆积=采不走，
+    // 无论市场缺口是什么，都优先补强采集(造重 WORK 矿工)。这修用户看到的矿池堆积。
+    try {
+      const wm = require('worldmodel');
+      const flow = wm.economyFlow(room);
+      if (flow.harvestStarved) {
+        topType = 'harvest'; // 源头瓶颈，压倒一切先补采集
+      } else if ((topType === 'haul' || topType === 'fill') && flow.haulHave >= flow.haulNeed) {
+        // 运力已足，真正瓶颈是产出→改造采集者(若 harvest 也缺)，否则不造
+        if (shortage.harvest) topType = 'harvest';
+        else return; // 不造多余 Hauler
+      }
+    } catch (e) { /* worldmodel 不可用时不阻断 */ }
 
     // 能量预算：用 energyCapacityAvailable（满状态），不够就等（返回不造）
     const cap = room.energyCapacityAvailable;

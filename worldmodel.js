@@ -166,7 +166,20 @@ module.exports = {
     const haulerThroughput = (6 * CARRY_CAPACITY) / Math.max(1, avgDist * 2);
     const haulNeed = Math.max(1, Math.ceil(harvestRate / Math.max(0.1, haulerThroughput)));
     const haulHave = myCreeps.filter((c) => { const p = this.parts(c); return p.carry > 0 && p.work === 0; }).length;
-    return { harvestRate, haulNeed, haulHave, balance: haulHave - haulNeed, avgDist: Math.round(avgDist) };
+    // ⭐ source 堆积检测：source 能量越满 = 采集越不足(采不走在堆积浪费再生)。
+    // 这是用户看到的"矿池旁堆积"的物理信号。
+    let srcFill = 0;
+    for (const s of sources) srcFill += (s.energy || 0) / Math.max(1, s.energyCapacity || 3000);
+    srcFill = sources.length ? srcFill / sources.length : 0; // 平均填充率 0..1
+    // 采集产能是否吃满 source：实际在岗采集产能 vs source 上限
+    const harvestStarved = srcFill > 0.6 && harvestCapacity < sources.length * SOURCE_REGEN_RATE * 0.9;
+    return {
+      harvestRate, haulNeed, haulHave, balance: haulHave - haulNeed, avgDist: Math.round(avgDist),
+      srcFill: Math.round(srcFill * 100) / 100,
+      harvestStarved, // true = 采集不足, source 能量堆积浪费, 该补强采集
+      harvestCapacity,
+      harvestCeil: sources.length * SOURCE_REGEN_RATE, // 采集产能物理上限
+    };
   },
 
   // ================= 扩充：更多世界机制理解 =================
