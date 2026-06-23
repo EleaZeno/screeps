@@ -2,3 +2,13 @@ _smoketest.js
 node_modules/
 package-lock.json
 Gruntfile.js
+
+Gruntfile.brain.js
+_dist/
+_apicheck.js
+_memcheck.js
+_branchcheck.js
+_verify.js
+_memdump.txt
+_branchdump.txt
+_verify.txt
