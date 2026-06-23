@@ -21,6 +21,8 @@ const FILES = [
   'genome.js',
   // 工程规划层（基建+路网自动规划）
   'build.planner.js', 'layout.planner.js', 'roadmap.js', 'infra.js',
+  // tower 主动控制（防御开火/治疗/维修）
+  'tower.control.js',
 ];
 
 function api(p, method, bodyObj) {
