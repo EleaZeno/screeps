@@ -82,14 +82,19 @@ module.exports = {
       .forEach((t) => sources.push({ id: t.id, pos: t.pos, amount: t.store[RESOURCE_ENERGY], kind: 'tomb' }));
 
     for (const s of sources) {
-      // 能量越多越该搬（避免 container 溢出浪费）；capacity 随量缩放
+      // 能量越多越该搬（避免 container 溢出浪费）；capacity 随量缩放。
+      // 【修复 2026-06-23·hauler 过剩】原 capacity=ceil(amount/200) 在 container 囤积时
+      //   会膨胀到极大（5 罐 6800 能量 → ~34 haul 槽 → 24 个 creep 全去搬运一个本质是
+      //   "消费端不足" 造成的 backlog）。真正缺的是 upgrader（消费），不是 hauler（搬运）。
+      //   每个搬运源最多 2 个 hauler 槽足矣（一个在搬、一个在路上）；多了是把 creep
+      //   浪费在搬运一个不该存在的积压上。积压的正解是提高 upgrade 容量去消费它。
       tasks.push({
         id: `haul:${s.id}`,
         type: 'haul',
         targetId: s.id,
         pos: { x: s.pos.x, y: s.pos.y, roomName: room.name },
         baseValue: Math.min(90, 40 + s.amount / 30),
-        capacity: Math.max(1, Math.ceil(s.amount / 200)),
+        capacity: Math.min(2, Math.max(1, Math.ceil(s.amount / 400))),
         meta: { amount: s.amount, kind: s.kind },
       });
     }
@@ -140,6 +145,18 @@ module.exports = {
       upCap = Math.max(1, Math.min(8, Math.round(upBudget / 2)));
       // 防降级紧急时至少保 1 个
       if (downgradeUrgency > 0) upCap = Math.max(1, upCap);
+      // 【修复 2026-06-23·能量积压未转化为 RCL】当 container/storage 已囤大量能量时，
+      //   说明产出>消费、搬运端在空转。此时应放行更多 upgrader 把积压能量直接烧成
+      //   controller 进度（而不是让 24 个 hauler 在搬一堆没人消费的能量）。
+      //   储备能量按 "每 1000 富余能量多养 1 个 upgrader" 临时提额，封顶 12。
+      let backlog = (room.storage ? room.storage.store[RESOURCE_ENERGY] : 0);
+      const conts = room.find(FIND_STRUCTURES, {
+        filter: (s) => s.structureType === STRUCTURE_CONTAINER,
+      });
+      for (const c of conts) backlog += (c.store[RESOURCE_ENERGY] || 0);
+      if (backlog > 1500) {
+        upCap = Math.min(12, upCap + Math.floor(backlog / 1500));
+      }
     } catch (e) { /* fallback */ }
     tasks.push({
       id: `upgrade:${ctrl.id}`,
