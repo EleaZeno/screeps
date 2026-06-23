@@ -56,9 +56,19 @@ module.exports = {
       if (flow.harvestStarved) {
         topType = 'harvest'; // 源头瓶颈，压倒一切先补采集
       } else if ((topType === 'haul' || topType === 'fill') && flow.haulHave >= flow.haulNeed) {
-        // 运力已足，真正瓶颈是产出→改造采集者(若 harvest 也缺)，否则不造
-        if (shortage.harvest) topType = 'harvest';
-        else return; // 不造多余 Hauler
+        // 运力已足。haul/fill 任务的 capacity 随 container 囤量膨胀(可达 80+)，
+        // 会霸占 shortage 排名第一；若此时直接 return，则真实存在的 upgrade/build 缺口
+        // 永远得不到孵化 → 能量满仓溢出、spawn 空转、卡级。
+        // 正确做法：跳过被否决的 haul/fill，回落到 "下一个非搬运的真实缺口"
+        // (通常是 upgrade)，把过剩能量转成 RCL 进度。这不是为好看调参，
+        // 是因为 "能量产出 > 消耗" 的客观经济事实要求增加消耗端(升级/建造)产能。
+        if (shortage.harvest) {
+          topType = 'harvest';
+        } else {
+          const fallback = this._bestNonHaul(shortage);
+          if (fallback) topType = fallback;
+          else return; // 确实没有别的真实缺口才不造
+        }
       }
     } catch (e) { /* worldmodel 不可用时不阻断 */ }
 
@@ -72,6 +82,20 @@ module.exports = {
     const name = this._nameFor(topType) + '_' + Game.time;
     spawn.spawnCreep(body, name, { memory: { born: Game.time } });
   },
+  /**
+   * 从 shortage 中选出加权缺口最大的 "非搬运" 任务类型。
+   * 用于 haul/fill 被世界模型否决后的回落：把过剩能量导向升级/建造/维修。
+   * 返回 null = 确实没有非搬运缺口。
+   */
+  _bestNonHaul(shortage) {
+    let best = null, bestGap = 0;
+    for (const t in shortage) {
+      if (t === 'haul' || t === 'fill') continue;
+      if (shortage[t] > bestGap) { bestGap = shortage[t]; best = t; }
+    }
+    return best;
+  },
+
   /** 按任务类型 + 能量上限造最优 body */
   _bodyFor(type, cap) {
     switch (type) {
