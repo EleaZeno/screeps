@@ -137,12 +137,15 @@ module.exports = {
     // 能量产出 harvestRate(减去孵化/填充消耗)才能养几个 upgrader。
     // 这是分工流水线的关键：升级人数不能超过能量能养的，否则大家抢着升级没人采矿。
     let upCap = 4; // 默认
+    // ⭐ 激进：升级人数上限由进化基因 upCapMax 决定（默认 16，可进化到 30）
+    const _g = (Memory.brain && Memory.brain.genome && Memory.brain.genome.genes) || {};
+    const UPCAP_MAX = Math.round(_g.upCapMax || 16);
     try {
       const wm = require('worldmodel');
       const flow = wm.economyFlow(room);
       // 能量产出的 ~60% 可用于升级(其余给孵化/填充)，每 upgrader 按 2 WORK 估=2 e/tick
       const upBudget = flow.harvestRate * 0.6;
-      upCap = Math.max(1, Math.min(8, Math.round(upBudget / 2)));
+      upCap = Math.max(1, Math.min(UPCAP_MAX, Math.round(upBudget / 2)));
       // 防降级紧急时至少保 1 个
       if (downgradeUrgency > 0) upCap = Math.max(1, upCap);
       // 【修复 2026-06-23·能量积压未转化为 RCL】当 container/storage 已囤大量能量时，
@@ -155,7 +158,7 @@ module.exports = {
       });
       for (const c of conts) backlog += (c.store[RESOURCE_ENERGY] || 0);
       if (backlog > 1500) {
-        upCap = Math.min(12, upCap + Math.floor(backlog / 1500));
+        upCap = Math.min(UPCAP_MAX + 8, upCap + Math.floor(backlog / 1500));
       }
     } catch (e) { /* fallback */ }
     tasks.push({
@@ -216,9 +219,18 @@ module.exports = {
     }
   },
 
-  /** 防御任务：每个敌人 = 一个 defend 任务（高优先）。 */
+  /** 防御任务：每个【真威胁】敌人 = 一个高优先 defend 任务。
+   *  【修复 2026-06-24】纯 MOVE 侦察兵(无 ATTACK/RANGED/WORK/CLAIM)不生成 defend 任务，
+   *  否则 baseValue=100 的高价任务会把工人从升级上拉走去追一个追不上、打不动的侦察兵。 */
   _collectDefend(room, tasks) {
-    const hostiles = room.find(FIND_HOSTILE_CREEPS);
+    const hostiles = room.find(FIND_HOSTILE_CREEPS, {
+      filter: (h) => {
+        if (!h.getActiveBodyparts) return true;
+        const _CLAIM = (typeof CLAIM !== 'undefined') ? CLAIM : 'claim';
+        return (h.getActiveBodyparts(ATTACK) + h.getActiveBodyparts(RANGED_ATTACK) +
+          h.getActiveBodyparts(WORK) + h.getActiveBodyparts(_CLAIM)) > 0;
+      },
+    });
     for (const h of hostiles) {
       tasks.push({
         id: `defend:${h.id}`,
@@ -232,3 +244,4 @@ module.exports = {
     }
   },
 };
+

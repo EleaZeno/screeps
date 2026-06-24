@@ -34,14 +34,17 @@ module.exports = {
   },
 
   /**
-   * 当前 RCL 基建是否已完成（extension 全建成 + source container 就位）。
-   * RCL1 没 extension，只要有采集就算"完成"，可以升级。
+   * 当前 RCL 基建是否已完成。
+   * ⭐ 激进边建边升改造：不再要求 extension 全部建满才放行升级。
+   * 只要关键基建（source container 就位 + 半数 extension）到位，就放行边建边升。
+   * 这样能量不会被“等建满”戆住，扩张更快。RCL1 只要有采集即可升。
    */
   isComplete(room) {
     const rcl = room.controller.level;
     const need = this.extTarget(rcl);
-    if (this.extBuilt(room) < need) return false;      // extension 没建满
-    if (rcl >= 2 && !this.containersReady(room)) return false; // 静态采矿没就位
+    // 激进：extension 建成达一半即视为“足以边升”（不必全满）
+    if (need > 0 && this.extBuilt(room) < Math.ceil(need * 0.5)) return false;
+    if (rcl >= 2 && !this.containersReady(room)) return false; // 静态采矿是硬门槛，仍要求
     return true;
   },
 
@@ -55,3 +58,4 @@ module.exports = {
     return { rcl, extBuilt: built, extNeed: need, containersReady: cReady, complete: done };
   },
 };
+

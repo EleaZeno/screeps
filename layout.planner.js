@@ -65,11 +65,11 @@ module.exports = {
       const infra = require('infra');
       if (!infra.isComplete(room)) return;
     } catch (e) { /* infra 不可用时不阻断 */ }
-    if (Game.time % 100 !== 0) return;
+    if (Game.time % 20 !== 0) return;
 
     let queued = 0;
     for (const r of room.memory.layout.roads) {
-      if (queued >= 5) break;
+      if (queued >= 10) break;
       const pos = new RoomPosition(r.x, r.y, room.name);
       const hasRoad = pos.lookFor(LOOK_STRUCTURES).some((s) => s.structureType === STRUCTURE_ROAD);
       const hasSite = pos.lookFor(LOOK_CONSTRUCTION_SITES).some((s) => s.structureType === STRUCTURE_ROAD);
@@ -80,3 +80,4 @@ module.exports = {
     if (queued > 0) console.log(`[LAYOUT] ${room.name} 排了 ${queued} 段道路工地`);
   },
 };
+

@@ -79,3 +79,4 @@ module.exports = {
     return lines.join('\n');
   },
 };
+

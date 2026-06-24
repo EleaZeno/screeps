@@ -126,3 +126,4 @@ module.exports = {
     return { rcl: c.rcl, creeps: c.creepCount, eFill: Math.round(c.energyFill * 100), sites: c.nSites, remain: c.remainWork };
   },
 };
+

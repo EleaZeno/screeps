@@ -76,3 +76,4 @@ module.exports = {
     return s > 2 ? Math.min(1, (s - 2) / 5) : 0; // 连续乏力>2次才介入，平滑
   },
 };
+

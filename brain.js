@@ -51,6 +51,12 @@ module.exports = {
     b._lastE = cur;
   },
 
+  /** 读进化基因（缺失用默认）。让 brain 的战略斜率真正由进化决定，而非写死。 */
+  _genes(b) {
+    if (b && b.genome && b.genome.genes) return b.genome.genes;
+    return { harvestBase: 1.4, haulBase: 1.2, upgradeGain: 1.5, buildUrgency: 1.4, fillStarve: 1.5 };
+  },
+
   _compute(room, b) {
     const ctrl = room.controller;
     const rcl = ctrl ? ctrl.level : 1;
@@ -62,19 +68,35 @@ module.exports = {
     const storage = room.storage;
     const stored = storage ? storage.store[RESOURCE_ENERGY] : 0;
 
+    // ⭐ 接通进化基因：基础权重不再写死，由 genome 进化决定（修复进化空转）
+    const G = this._genes(b);
     const w = {
-      harvest: 1.4, haul: 1.2, fill: 1.0,
+      harvest: G.harvestBase, haul: G.haulBase, fill: 1.0,
       upgrade: 1.0, build: 1.0, repair: 0.8, defend: 0.01,
     };
 
     // ============ 前瞻 1：敌人 ETA + 威胁强度 ============
     // 不等贴脸——算最近敌人到 spawn 的步数和它的攻击能力，提前按"还有几 tick"布防
-    const hostiles = room.find(FIND_HOSTILE_CREEPS);
-    if (hostiles.length > 0) {
+    // 【修复 2026-06-24·空耗：追无害侦察兵】原逻辑对任意敌方 creep 都 threat += max(1,atk)，
+    //   导致一个纯 MOVE 的 1 身侦察兵(0 攻击)也触发 w.defend=2.0+，把没有 ATTACK 部件的
+    //   工人拉去 defend(fitness 仅 0.05)，徒劳追逐一个追不上、也打不动的侦察兵 → RCL 进度被拖。
+    //   真正构成威胁的是带 ATTACK/RANGED_ATTACK(或 WORK 拆迁/CLAIM 降级)的敌人。无攻击部件的
+    //   纯侦察兵在新手保护期下零威胁，应忽略，让殖民地专心冲级。
+    const allHostiles = room.find(FIND_HOSTILE_CREEPS);
+    const threatening = allHostiles.filter((h) => {
+      if (!h.getActiveBodyparts) return true; // 拿不到 body 信息保守视为威胁
+      const _CLAIM = (typeof CLAIM !== 'undefined') ? CLAIM : 'claim';
+      const atk = h.getActiveBodyparts(ATTACK);
+      const rng = h.getActiveBodyparts(RANGED_ATTACK);
+      const work = h.getActiveBodyparts(WORK); // 可拆建筑
+      const claim = h.getActiveBodyparts(_CLAIM); // 可降级/夺控
+      return (atk + rng + work + claim) > 0;
+    });
+    if (threatening.length > 0) {
       const spawn = room.find(FIND_MY_SPAWNS)[0];
       let minEta = 50, threat = 0;
-      for (const h of hostiles) {
-        const atk = h.getActiveBodyparts ? (h.getActiveBodyparts(ATTACK) + h.getActiveBodyparts(RANGED_ATTACK) * 1.5 + h.getActiveBodyparts(WORK) * 0.5) : 4;
+      for (const h of threatening) {
+        const atk = h.getActiveBodyparts ? (h.getActiveBodyparts(ATTACK) + h.getActiveBodyparts(RANGED_ATTACK) * 1.5 + h.getActiveBodyparts(WORK) * 0.5 + h.getActiveBodyparts((typeof CLAIM !== 'undefined') ? CLAIM : 'claim') * 1.0) : 4;
         threat += Math.max(1, atk);
         if (spawn) {
           const d = Math.max(Math.abs(h.pos.x - spawn.pos.x), Math.abs(h.pos.y - spawn.pos.y));
@@ -87,6 +109,8 @@ module.exports = {
       // 受威胁时回填 spawn 优先（要能孵防御 creep）
       w.fill += 1.0;
     }
+    // 诊断里记录"真威胁数 vs 总敌数"，便于线上区分侦察兵骚扰与真攻击
+    const hostiles = threatening; // 下游诊断沿用真威胁列表
 
     // ============ 前瞻 2：降级倒计时连续增援 ============
     // v1 是 <3000 硬跳 1.5；这里改成"越接近降级，upgrade 提前量越大"的连续斜坡
@@ -102,15 +126,15 @@ module.exports = {
     let remainWork = 0;
     for (const s of sites) remainWork += (s.progressTotal - s.progress);
     if (nSites > 0) {
-      // 剩余工程多 → build 高；剩余少(快完工) → build 平滑下降
-      const buildUrgency = ramp(remainWork, 200, 3000); // 工程量 200..3000 映射强度
-      w.build = 0.6 + buildUrgency * 1.4;               // 0.6 .. 2.0
+      // 剩余工程多 → build 高；剩余少(快完工) → build 平滑下降。斜率由进化基因 buildUrgency 决定。
+      const buildRamp = ramp(remainWork, 200, 3000); // 工程量 200..3000 映射强度
+      w.build = 0.8 + buildRamp * (G.buildUrgency + 0.4);   // 激进：建造发力更猛
       // 工地存在时 upgrade 基础压低，但降级风险通过 downgradeBoost 顶上来
-      w.upgrade = 0.5 + (1 - buildUrgency) * 0.6 + downgradeBoost;
+      w.upgrade = 0.6 + (1 - buildRamp) * 0.8 + downgradeBoost;
     } else {
-      // 无工地 → 能量全砸升级冲 RCL，富余越多越狂
+      // 无工地 → 能量全砸升级冲 RCL，富余越多越狂。增益由进化基因 upgradeGain 决定。
       w.build = 0.3;
-      w.upgrade = 1.0 + energyFill * 1.5 + (stored > 5000 ? 1.0 : 0) + downgradeBoost;
+      w.upgrade = 1.0 + energyFill * G.upgradeGain + (stored > 5000 ? 1.2 : 0) + downgradeBoost;
     }
 
     // ============ 前瞻 4：能量趋势预测（会不会饿死）============
@@ -118,7 +142,7 @@ module.exports = {
     const eRate = b._eRate || 0;
     if (eRate < -0.5 && energyFill < 0.8) {
       const starve = ramp(-eRate, 0, 10) * (1 - energyFill); // 流出越快+越空 → 越紧急
-      w.fill += starve * 1.5;
+      w.fill += starve * G.fillStarve;
       w.harvest += starve * 0.6; // 顺带催采集补源头
     }
     // 静态缺能量保孵化（保底，v1 逻辑保留）
@@ -161,10 +185,17 @@ module.exports = {
     // 例外：防降级紧急(downgradeBoost大)时允许升级临时超过。
     if (downgradeBoost < 1.0) {
       const harvestFloor = w.harvest;       // 采集是流水线源头，作为地板
-      w.upgrade = Math.min(w.upgrade, harvestFloor * 1.5); // 升级最多是采集的 1.5 倍
-      w.build = Math.min(w.build, harvestFloor * 1.5);
+      // ⭐ 激进改造：原硜上限 1.5x 压死建设/升级，能量囤再多也烧不出去。
+      // 改为动态上限：能量越囤积（当前能量满+storage存货多），升级/建造越该狂烧（到 4x）。
+      // 这是“能量产出>消费”的客观经济事实要求增加消费端，而非调参。
+      const backlogRatio = Math.min(1, energyFill * 0.4 + ramp(stored, 0, 20000) * 0.6);
+      const spendCap = 1.5 + backlogRatio * 2.5; // 1.5x(缺能) .. 4.0x(囤积狂烧)
+      w.upgrade = Math.min(w.upgrade, harvestFloor * spendCap);
+      w.build = Math.min(w.build, harvestFloor * spendCap);
+      b._diag.spendCap = Math.round(spendCap * 100) / 100;
     }
 
     return w;
   },
 };
+

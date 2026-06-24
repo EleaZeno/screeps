@@ -146,6 +146,8 @@ module.exports = {
    * 产出 > 运力 → 缺 Hauler；运力 > 产出 → Hauler 过剩(失业)。
    */
   economyFlow(room) {
+    // ⭐ CPU 优化：tick 级缓存（同一 tick 多模块重复调用不重算）
+    if (room._ecoFlow && room._ecoFlowTick === Game.time) return room._ecoFlow;
     const sources = room.find(FIND_SOURCES);
     const myCreeps = room.find(FIND_MY_CREEPS);
     let harvestCapacity = 0;
@@ -173,13 +175,16 @@ module.exports = {
     srcFill = sources.length ? srcFill / sources.length : 0; // 平均填充率 0..1
     // 采集产能是否吃满 source：实际在岗采集产能 vs source 上限
     const harvestStarved = srcFill > 0.6 && harvestCapacity < sources.length * SOURCE_REGEN_RATE * 0.9;
-    return {
+    const _result = {
       harvestRate, haulNeed, haulHave, balance: haulHave - haulNeed, avgDist: Math.round(avgDist),
       srcFill: Math.round(srcFill * 100) / 100,
       harvestStarved, // true = 采集不足, source 能量堆积浪费, 该补强采集
       harvestCapacity,
       harvestCeil: sources.length * SOURCE_REGEN_RATE, // 采集产能物理上限
     };
+    room._ecoFlow = _result;
+    room._ecoFlowTick = Game.time;
+    return _result;
   },
 
   // ================= 扩充：更多世界机制理解 =================
@@ -315,3 +320,4 @@ module.exports = {
     };
   },
 };
+

@@ -76,7 +76,8 @@ module.exports = {
   harvesterTarget(room, oversub) {
     const slots = this.totalSlots(room);
     if (slots === 0) return 0;
-    return Math.ceil(slots * (oversub || 1.4));
+    // ⭐ 激进：oversub 默认提到 1.6（可被调用方传入的进化基因覆盖），更多采集者轮替提吞吐
+    return Math.ceil(slots * (oversub || 1.6));
   },
 
   /**
@@ -121,3 +122,4 @@ module.exports = {
     return null;
   },
 };
+

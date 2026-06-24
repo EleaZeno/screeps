@@ -30,9 +30,12 @@ const GENES = {
   // brain 战略斜率
   harvestBase:  [1.4, 1.0, 2.2],      // 采集基础权重
   haulBase:     [1.2, 0.8, 2.0],      // 搬运基础权重
-  upgradeGain:  [1.5, 0.5, 3.0],      // 富余时升级权重增益
-  buildUrgency: [1.4, 0.5, 2.5],      // 建造紧急度斜率
+  upgradeGain:  [1.8, 0.5, 4.0],      // 富余时升级权重增益（激进：上限拉到 4）
+  buildUrgency: [1.6, 0.5, 3.0],      // 建造紧急度斜率（激进：上限拉高）
   fillStarve:   [1.5, 0.5, 3.0],      // 饥荒时回填强度
+  // 扩张类基因（新增）
+  oversub:      [1.6, 1.2, 2.4],      // 采集超额订阅系数（越大越多采集者轮替）
+  upCapMax:     [16, 8, 30],          // upgrade 任务容量上限（能烧多少能量）
   // 市场
   candPerType:  [4, 2, 8],            // 每类候选数（CPU vs 质量权衡）
 };
@@ -133,3 +136,4 @@ module.exports = {
 
   _clone(o) { const r = {}; for (const k in o) r[k] = o[k]; return r; },
 };
+

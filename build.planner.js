@@ -143,9 +143,9 @@ module.exports = {
   planRoads(room) {
     let wm; try { wm = require('worldmodel'); } catch (e) { return; }
     const existingRoadSites = room.find(FIND_CONSTRUCTION_SITES, { filter: (s) => s.structureType === STRUCTURE_ROAD }).length;
-    if (existingRoadSites >= 5) return; // 同时最多 5 个路工地，别压城
+    if (existingRoadSites >= 10) return; // 激进：同时最多 10 个路工地（原 5）
     const plan = wm.planRoads(room);
-    let budget = 5 - existingRoadSites;
+    let budget = 10 - existingRoadSites;
     let built = 0;
     for (const seg of plan.segments) {
       if (budget <= 0) break;
@@ -251,3 +251,4 @@ module.exports = {
     if (placed > 0) console.log(`[BUILD] queued ${placed} x ${type} in ${room.name}`);
   },
 };
+

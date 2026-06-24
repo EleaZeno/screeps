@@ -24,20 +24,47 @@ module.exports = {
    * @param room
    * @param shortage  market.shortage() 的结果：{type: 加权缺口}
    * @param creepCount 当前 creep 总数
+   * ⭐ 激进多 spawn 并行孵化：所有空闲 spawn 都参与，绝不让 spawn 闲着。
    */
   run(room, shortage, creepCount) {
-    const spawn = room.find(FIND_MY_SPAWNS, { filter: (s) => !s.spawning })[0];
-    if (!spawn) return;
+    const idleSpawns = room.find(FIND_MY_SPAWNS, { filter: (s) => !s.spawning });
+    if (!idleSpawns.length) return; // 所有 spawn 都在忙
+    // 每个空闲 spawn 轮流孵化（多 spawn 并行）
+    let idx = 0;
+    for (const spawn of idleSpawns) {
+      const stillIdle = this._runOne(room, spawn, shortage, creepCount + idx);
+      if (stillIdle) idx++; // 成功孵一个则人口 +1，后续 spawn 按新人口决策
+    }
+  },
 
-    // 无缺口 = 所有任务满员 → 不造（人口由任务容量自然封顶）
+  /** 单个 spawn 的孵化决策。返回 true=成功发起孵化。 */
+  _runOne(room, spawn, shortage, creepCount) {
+    // 无缺口 = 所有任务满员。激进模式：即使无缺口，只要能量产能还能养更多人，
+    // 就预生产一个 worker（扩张期绝不让 spawn 歇着）。
     const types = Object.keys(shortage);
-    if (types.length === 0) return;
+    if (types.length === 0) {
+      // 预生产闸门：仅当能量有富余（不会餓死现有人）且人口未过经济极限时才预生产
+      try {
+        const wm = require('worldmodel');
+        const flow = wm.economyFlow(room);
+        // 经济能养的 worker 上限粗估：采集产出 / 2 (每 worker ~2 WORK 耗 2e/tick) + 基础采集/搬运
+        const econCap = Math.ceil(flow.harvestRate / 2) + flow.haulNeed + 4;
+        const cap = room.energyCapacityAvailable;
+        // 能量满且人口未达经济上限 → 预生产一个 worker 烧能量/加速扩张
+        if (creepCount < econCap && room.energyAvailable >= this._cost(this._workerBody(cap))) {
+          const body = this._workerBody(cap);
+          spawn.spawnCreep(body, 'Worker_' + Game.time, { memory: { born: Game.time } });
+          return true;
+        }
+      } catch (e) { /* 预生产失败不阻断 */ }
+      return false;
+    }
 
     // 绝境保护：完全没 creep 且能量够最小体 → 立刻出一个最小工人（防团灭死锁）
     // 这是唯一保留的"保底"，但它不是 if 嵌套决策——是市场空转时的冷启动种子。
     if (creepCount === 0) {
       if (room.energyAvailable >= 200) spawn.spawnCreep([WORK, CARRY, MOVE], 'Seed_' + Game.time, { memory: {} });
-      return;
+      return true;
     }
 
     // 找加权缺口最大的任务类型
@@ -82,7 +109,7 @@ module.exports = {
         } else {
           const fallback = this._bestNonHaul(shortage);
           if (fallback) topType = fallback;
-          else return; // 确实没有别的真实缺口才不造
+          else return false; // 确实没有别的真实缺口才不造
         }
       }
     } catch (e) { /* worldmodel 不可用时不阻断 */ }
@@ -113,14 +140,16 @@ module.exports = {
       const fbCost = this._cost(fb);
       if (cur >= fbCost) {
         spawn.spawnCreep(fb, 'Filler_' + Game.time, { memory: { born: Game.time } });
+        return true;
       }
-      return;
+      return false;
     }
 
-    if (cur < cost) return; // 攒能量，下 tick 再来（不出垃圾小号）
+    if (cur < cost) return false; // 攒能量，下 tick 再来（不出垃圾小号）
 
     const name = this._nameFor(topType) + '_' + Game.time;
     spawn.spawnCreep(body, name, { memory: { born: Game.time } });
+    return true;
   },
   /**
    * 从 shortage 中选出加权缺口最大的 "非搬运" 任务类型。
@@ -171,17 +200,17 @@ module.exports = {
     return [WORK, CARRY, MOVE];
   },
 
-  /** 搬运体：成对 CARRY+MOVE */
+  /** 搬运体：成对 CARRY+MOVE（上限拉到 16 对，高 RCL 运力更猛） */
   _haulerBody(cap) {
-    const pairs = Math.max(1, Math.min(8, Math.floor(cap / 100)));
+    const pairs = Math.max(1, Math.min(16, Math.floor(cap / 100)));
     const b = [];
     for (let i = 0; i < pairs; i++) { b.push(CARRY); b.push(MOVE); }
     return b;
   },
 
-  /** 工人体：均衡 WORK+CARRY+MOVE 单元堆叠（采/建/升通用） */
+  /** 工人体：WORK+CARRY+MOVE 单元堆叠（采/建/升通用，上限拉到 10 单元） */
   _workerBody(cap) {
-    const units = Math.max(1, Math.min(6, Math.floor(cap / 200)));
+    const units = Math.max(1, Math.min(10, Math.floor(cap / 200)));
     const b = [];
     for (let i = 0; i < units; i++) { b.push(WORK); b.push(CARRY); b.push(MOVE); }
     return b;
@@ -211,3 +240,4 @@ module.exports = {
     }[type] || 'Creep';
   },
 };
+
