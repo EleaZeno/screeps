@@ -50,7 +50,16 @@ module.exports = {
       for (const k in GENES) g[k] = GENES[k][0];
       brainMem.genome = { genes: g, fitness: null, gen: 0, baselineProg: null, evalStart: Game.time };
     }
-    return brainMem.genome.genes;
+    // ⭐ 新基因回填(2026-06-24 修复)：GENES 后续新增的基因，对【已存在的老存档】
+    //   genome.genes 里是 undefined/null（如线上观测到 upCapMax:null）。
+    //   current() 原本只在 genome 不存在时初始化，老存档永远拿不到新基因 → 下游
+    //   Math.round(null||16) 虽有兜底但该基因【永不参与进化】(始终回退默认)。
+    //   这里补一次性回填：任何缺失/非有限值的基因用默认值补上，使其纳入进化。
+    const genes = brainMem.genome.genes || (brainMem.genome.genes = {});
+    for (const k in GENES) {
+      if (typeof genes[k] !== 'number' || !isFinite(genes[k])) genes[k] = GENES[k][0];
+    }
+    return genes;
   },
 
   /**

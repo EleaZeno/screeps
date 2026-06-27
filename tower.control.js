@@ -41,7 +41,7 @@ module.exports = {
 
     if (hostiles.length > 0) {
       // 选目标：优先打带治疗/进攻部件的（威胁大），其次最近。
-      const target = this._pickHostile(towers[0], hostiles);
+      const target = this._pickHostile(towers[0], hostiles, towers.length);
       for (const t of towers) {
         if (t.store[RESOURCE_ENERGY] >= 10) { t.attack(target); fired = true; }
       }
@@ -64,27 +64,63 @@ module.exports = {
     }
 
     // 和平期 → 维修（留能量底线，避免抽干）
+    // ⚠️ 多 tower 不该全去修同一个目标：单个结构每 tick 被一个塔修复(TOWER_POWER_REPAIR=800)已足够，
+    // 多塔叠加是浪费能量。只让一个能量最多的塔出修，其余塔和平期沉默攒能(真打起来才有火力)。
     const target = this._pickRepair(room);
     if (target) {
+      let repairer = null, maxE = -1;
       for (const t of towers) {
-        if (t.store[RESOURCE_ENERGY] >= REPAIR_ENERGY_FLOOR) { t.repair(target); }
+        const e = t.store[RESOURCE_ENERGY];
+        if (e >= REPAIR_ENERGY_FLOOR && e > maxE) { maxE = e; repairer = t; }
       }
+      if (repairer) repairer.repair(target);
     }
     return false;
   },
 
-  /** 选最该打的敌人：治疗部件 > 进攻部件 > 距离近。 */
-  _pickHostile(anchor, hostiles) {
+  /** 选最该打的敌人：综合「实际能造成的伤害(按射程衰减)」「治疗兵优先点杀」「能否击穿其自愈」。
+   *  Screeps tower 伤害随距离线性衰减：≤5 格满伤 600，≥20 格仅 150，中间线性。
+   *  原实现只用 -dist(每格扣1分)，权重太小 → 可能锁定 20 格外几乎打不动的目标，
+   *  让贴脸真威胁逃脱。改为按「实际有效伤害」为主排序，更贴合物理。 */
+  _pickHostile(anchor, hostiles, towerCount) {
+    let nTowers = towerCount;
+    if (!nTowers) {
+      const r = anchor && anchor.room;
+      nTowers = (r && r.find ? (r.find(FIND_MY_STRUCTURES, { filter: (s) => s.structureType === STRUCTURE_TOWER }) || []).length : 1) || 1;
+    }
     let best = null, bestScore = -Infinity;
     for (const h of hostiles) {
       const heal = h.getActiveBodyparts ? h.getActiveBodyparts(HEAL) : 0;
       const atk = h.getActiveBodyparts ? (h.getActiveBodyparts(ATTACK) + h.getActiveBodyparts(RANGED_ATTACK)) : 0;
       const dist = anchor.pos.getRangeTo(h);
-      // 治疗兵最该先点掉（否则打不死），其次进攻兵，再按距离（越近塔伤越高）。
-      const score = heal * 1000 + atk * 100 - dist;
+      const dmg = this._towerDamageAt(dist);            // 单塔对该目标的实际伤害
+      const totalDmg = dmg * nTowers;                   // 全塔集火的总伤害
+      // 该目标自愈能力(HEAL_POWER=12/部件)：集火总伤打不穿自愈则几乎无意义 → 降权。
+      const selfHeal = heal * 12;
+      const pierce = totalDmg - selfHeal;               // 能否击穿自愈(>0 才打得动)
+      // 评分：打得动(pierce>0)的目标优先；治疗兵/进攻兵威胁高加权；同档比实际伤害(=越近)。
+      let score = dmg;                                  // 基础 = 实际能造成的伤害(越近越高)
+      score += atk * 30;                                // 进攻部件越多越该先除
+      score += heal * 120;                              // 治疗兵最该先点(否则打不死队友;治疗是部队力量倍增器,权重高于进攻)
+      if (pierce > 0) score += 2000;                    // 关键：能击穿自愈的目标巨幅优先
       if (score > bestScore) { bestScore = score; best = h; }
     }
     return best;
+  },
+
+  /** tower 对给定距离目标的实际伤害(线性衰减)。
+   *  TOWER_POWER_ATTACK=600，TOWER_OPTIMAL_RANGE=5(满伤)，TOWER_FALLOFF_RANGE=20(最低)，
+   *  TOWER_FALLOFF=0.75(最远衰减到 25%)。 */
+  _towerDamageAt(range) {
+    const FULL = (typeof TOWER_POWER_ATTACK !== 'undefined') ? TOWER_POWER_ATTACK : 600;
+    const OPT = (typeof TOWER_OPTIMAL_RANGE !== 'undefined') ? TOWER_OPTIMAL_RANGE : 5;
+    const FAR = (typeof TOWER_FALLOFF_RANGE !== 'undefined') ? TOWER_FALLOFF_RANGE : 20;
+    const FALLOFF = (typeof TOWER_FALLOFF !== 'undefined') ? TOWER_FALLOFF : 0.75;
+    if (range <= OPT) return FULL;
+    if (range >= FAR) return FULL * (1 - FALLOFF);
+    // OPT..FAR 之间线性衰减
+    const t = (range - OPT) / (FAR - OPT);
+    return FULL * (1 - FALLOFF * t);
   },
 
   /** 选最该修的建筑：低血非墙建筑 > 低于目标的 rampart。返回 null=没活。 */

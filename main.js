@@ -31,6 +31,9 @@ try { layoutPlanner = require('layout.planner'); } catch (e) { layoutPlanner = n
 // —— tower 主动控制（V3 架构原本缺失：没人指挥 tower 结构开火/治疗/维修）——
 let towerControl;
 try { towerControl = require('tower.control'); } catch (e) { towerControl = null; }
+// —— 跨房外矿模块（周边无主空房免费采矿，V3 架构原本缺失）——
+let remoteMining;
+try { remoteMining = require('remote.mining'); } catch (e) { remoteMining = null; }
 
 // —— Memory 自净：清理调试残留的 __xxx 顶层临时键 ——
 // 控制台调试/autopilot 会往 Memory 写一次性 __probe/__diag/__autopilot 等 scratch 键，
@@ -59,7 +62,8 @@ module.exports.loop = function () {
     const room = Game.rooms[roomName];
     if (!room.controller || !room.controller.my) continue;
 
-    const myCreeps = room.find(FIND_MY_CREEPS);
+    // 外矿 creep(memory.remote) 不参与本房市场分配，避免回家卸货那几 tick 被 market 抢去干本房活。
+    const myCreeps = room.find(FIND_MY_CREEPS, { filter: (c) => !c.memory.remote });
 
     // 0a. 防御层：主动驱动 tower（攻击敌人 > 治疗友军 > 和平期维修）。
     // 放在最前：tower 反应速度直接决定房间被打时能否扛住。CPU 极低。
@@ -89,7 +93,9 @@ module.exports.loop = function () {
     // 8. 进化：用真实 progress 增速评估基��组，变异保优淘劣（真自学习，不可自欺）
     if (!Memory.brain) Memory.brain = {};
     genome.current(Memory.brain); // 确保基因组已初始化
-    genome.evolve(room, Memory.brain, 300);
+    // 评估窗口 500 tick：RCL 早期单窗 progress 增速噪声大(实测 fit 在 1~12 跳)，
+    // 加长观测窗降低方差，让进化比较更可信(配合 evolve 内 >2% 改进阈值抗噪)。
+    genome.evolve(room, Memory.brain, 500);
 
     // 轻量观测（每 10 tick 打一次大脑状态 + 当前计划）
     if (Game.time % 10 === 0) {
@@ -99,6 +105,10 @@ module.exports.loop = function () {
       console.log(`🧠 ${roomName} RCL${room.controller.level} creeps=${myCreeps.length} 计划=[${d.goal || '?'}:${d.plan || ''}] 进化代=${gn.gen || 0} fit=${gn.lastFitness != null ? gn.lastFitness : '?'} 缺口=[${gapStr}]`);
     }
   }
+
+  // ===== 跨房外矿（全局处理一次，与 per-room 循环解耦）=====
+  // 外矿 creep 带 memory.remote 标记，executor 会走跨房 handler；market 不管它们。
+  if (remoteMining) { try { remoteMining.run(); } catch (e) { console.log('remote err ' + e); } }
 
   // ===== CPU 实测（写入 Memory 供外部读回）=====
   if (typeof Game !== 'undefined' && Game.cpu && Game.cpu.getUsed) {

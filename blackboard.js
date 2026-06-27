@@ -73,7 +73,8 @@ module.exports = {
   /** 搬运任务：每个有能量的 container/掉落物/坟墓 = 一个 haul 任务。 */
   _collectHaul(room, tasks) {
     const sources = [];
-    room.find(FIND_DROPPED_RESOURCES, { filter: (r) => r.resourceType === RESOURCE_ENERGY && r.amount > 30 })
+    // 地上掉落：门槛 30→10（少量散料也捡，地上每 tick 衰减不捡就损耗）。
+    room.find(FIND_DROPPED_RESOURCES, { filter: (r) => r.resourceType === RESOURCE_ENERGY && r.amount > 10 })
       .forEach((r) => sources.push({ id: r.id, pos: r.pos, amount: r.amount, kind: 'dropped' }));
     room.find(FIND_STRUCTURES, {
       filter: (s) => (s.structureType === STRUCTURE_CONTAINER) && s.store[RESOURCE_ENERGY] > 50,
@@ -93,8 +94,10 @@ module.exports = {
         type: 'haul',
         targetId: s.id,
         pos: { x: s.pos.x, y: s.pos.y, roomName: room.name },
-        baseValue: Math.min(90, 40 + s.amount / 30),
-        capacity: Math.min(2, Math.max(1, Math.ceil(s.amount / 400))),
+        baseValue: Math.min(95, 40 + ((s.kind === 'dropped' || s.kind === 'tomb') ? 25 : 0) + s.amount / 30),
+        capacity: (s.kind === 'dropped' || s.kind === 'tomb')
+          ? Math.min(3, Math.max(1, Math.ceil(s.amount / 250)))
+          : Math.min(2, Math.max(1, Math.ceil(s.amount / 400))),
         meta: { amount: s.amount, kind: s.kind },
       });
     }

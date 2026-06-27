@@ -14,6 +14,8 @@ const utils = require('utils');
 
 module.exports = {
   run(creep) {
+    // ⭐ 外矿 creep 优先走跨房 handler（memory.remote 标记），不走市场任务流。
+    if (creep.memory.remote) { this._remote(creep, utils); return; }
     const type = creep.memory.taskType;
     const target = creep.memory.taskTarget ? Game.getObjectById(creep.memory.taskTarget) : null;
     const fn = this._handlers[type];
@@ -22,6 +24,93 @@ module.exports = {
     } else {
       this._idle(creep, utils);
     }
+  },
+
+  /** 跨房外矿执行：rharvest(去 target 房采矿) / rhaul(在 target 房捆能量运回 home)。
+   *  retreat 标记(target 房有敌)时一律撤回 home 避难。 */
+  _remote(creep, utils) {
+    const home = creep.memory.rHome;
+    const targetRoom = creep.memory.rTarget;
+
+    // —— 撤退：target 有敌 → 跑回 home 房 ——
+    if (creep.memory.retreat) {
+      if (creep.room.name !== home) {
+        const exitDir = Game.map.findExit(creep.room.name, home);
+        if (exitDir >= 0) {
+          const exit = creep.pos.findClosestByRange(exitDir);
+          if (exit) utils.moveTo(creep, exit, '#ff0000');
+        }
+      }
+      return;
+    }
+
+    if (creep.memory.taskType === 'rhaul') { this._rhaul(creep, home, targetRoom, utils); return; }
+    this._rharvest(creep, home, targetRoom, utils);
+  },
+
+  /** 外矿矿工：走到 target 房，钉住分配的 source 采；采满就近丢进 container/地上。 */
+  _rharvest(creep, home, targetRoom, utils) {
+    // 不在 target 房 → 先走过去（原生 moveTo 跨房 + 复用路网）
+    if (creep.room.name !== targetRoom) {
+      const dir = Game.map.findExit(creep.room.name, targetRoom);
+      if (dir >= 0) { const exit = creep.pos.findClosestByRange(dir); if (exit) utils.moveTo(creep, exit, '#ffaa00'); }
+      return;
+    }
+    const src = creep.memory.rSource ? Game.getObjectById(creep.memory.rSource) : null;
+    const source = src || creep.pos.findClosestByPath(FIND_SOURCES_ACTIVE) || creep.room.find(FIND_SOURCES)[0];
+    if (!source) return;
+    if (!creep.memory.rSource && source) creep.memory.rSource = source.id;
+    // 满了 → 丢进就近 container（给 rhaul 取），没 container 就地上 drop
+    if (creep.store.getFreeCapacity(RESOURCE_ENERGY) === 0) {
+      const cont = source.pos.findInRange(FIND_STRUCTURES, 1, { filter: (s) => s.structureType === STRUCTURE_CONTAINER && s.store.getFreeCapacity(RESOURCE_ENERGY) > 0 })[0];
+      if (cont) { if (utils.work(creep, 'transfer', cont, RESOURCE_ENERGY) === ERR_NOT_IN_RANGE) utils.moveTo(creep, cont, '#ffffff'); }
+      else { creep.drop(RESOURCE_ENERGY); }
+      return;
+    }
+    if (utils.work(creep, 'harvest', source) === ERR_NOT_IN_RANGE) utils.moveTo(creep, source, '#ffaa00');
+  },
+
+  /** 外矿搬运：在 target 房装能量(掉落>container>矿工身上)，装满运回 home 房。 */
+  _rhaul(creep, home, targetRoom, utils) {
+    const loaded = creep.store.getFreeCapacity(RESOURCE_ENERGY) === 0;
+    const empty = creep.store[RESOURCE_ENERGY] === 0;
+    // 状态机：未满且不在回家途中 → 去 target 房装货；满了 → 回 home 卸货。
+    if (creep.memory.rState === 'deliver' && empty) creep.memory.rState = 'load';
+    if (loaded) creep.memory.rState = 'deliver';
+    if (!creep.memory.rState) creep.memory.rState = 'load';
+
+    if (creep.memory.rState === 'load') {
+      // 去 target 房
+      if (creep.room.name !== targetRoom) {
+        const dir = Game.map.findExit(creep.room.name, targetRoom);
+        if (dir >= 0) { const exit = creep.pos.findClosestByRange(dir); if (exit) utils.moveTo(creep, exit, '#ffaa00'); }
+        return;
+      }
+      // 优先：地上掉落 > container > tombstone
+      const drop = creep.pos.findClosestByPath(FIND_DROPPED_RESOURCES, { filter: (r) => r.resourceType === RESOURCE_ENERGY && r.amount > 20 });
+      if (drop) { if (creep.pickup(drop) === ERR_NOT_IN_RANGE) utils.moveTo(creep, drop, '#ffaa00'); return; }
+      const cont = creep.pos.findClosestByPath(FIND_STRUCTURES, { filter: (s) => (s.structureType === STRUCTURE_CONTAINER || s.structureType === STRUCTURE_STORAGE) && s.store[RESOURCE_ENERGY] > 0 });
+      if (cont) { if (utils.work(creep, 'withdraw', cont, RESOURCE_ENERGY) === ERR_NOT_IN_RANGE) utils.moveTo(creep, cont, '#ffaa00'); return; }
+      const tomb = creep.pos.findClosestByPath(FIND_TOMBSTONES, { filter: (t) => t.store[RESOURCE_ENERGY] > 0 });
+      if (tomb) { if (utils.work(creep, 'withdraw', tomb, RESOURCE_ENERGY) === ERR_NOT_IN_RANGE) utils.moveTo(creep, tomb, '#ffaa00'); return; }
+      // target 房没现成能量：走到矿工旁等装(靠近 source 的矿工会 drop)
+      const rsrc = creep.room.find(FIND_SOURCES)[0];
+      if (rsrc && !creep.pos.inRangeTo(rsrc, 3)) utils.moveTo(creep, rsrc, '#888888');
+      return;
+    }
+
+    // deliver：回 home 房卸货
+    if (creep.room.name !== home) {
+      const dir = Game.map.findExit(creep.room.name, home);
+      if (dir >= 0) { const exit = creep.pos.findClosestByRange(dir); if (exit) utils.moveTo(creep, exit, '#ffffff'); }
+      return;
+    }
+    const drop = utils.findEnergyDropOff ? utils.findEnergyDropOff(creep) : null;
+    const dst = drop || (Game.rooms[home] && Game.rooms[home].storage) || (Game.rooms[home] && Game.rooms[home].controller);
+    if (!dst) return;
+    const verb = (dst.structureType === STRUCTURE_CONTROLLER) ? 'upgradeController' : 'transfer';
+    const r = verb === 'transfer' ? utils.work(creep, 'transfer', dst, RESOURCE_ENERGY) : utils.work(creep, 'upgradeController', dst);
+    if (r === ERR_NOT_IN_RANGE) utils.moveTo(creep, dst, '#ffffff');
   },
 
   _handlers: {
@@ -135,7 +224,10 @@ module.exports = {
         if (store) { if (utils.work(creep, 'transfer', store, RESOURCE_ENERGY) === ERR_NOT_IN_RANGE) utils.moveTo(creep, store, '#ffffff'); return; }
         return;
       }
-      // 空载待命：去 source 旁 container 接货，按名字哈希分散到不同 source(不挤一处)
+      // 空载待命：先看附近有无地上掉落(会衰减,优先捡)，再去 source 旁 container 接货。
+      const nearDrop = creep.pos.findClosestByPath(FIND_DROPPED_RESOURCES, { filter: (r) => r.resourceType === RESOURCE_ENERGY && r.amount >= 10 });
+      if (nearDrop) { if (creep.pickup(nearDrop) === ERR_NOT_IN_RANGE) utils.moveTo(creep, nearDrop, '#ffaa00'); return; }
+      // 按名字哈希分散到不同 source(不挤一处)
       const srcs = creep.room.find(FIND_SOURCES);
       if (srcs.length) {
         const pick = srcs[creep.name.charCodeAt(creep.name.length - 1) % srcs.length];

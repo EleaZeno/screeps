@@ -120,11 +120,19 @@ module.exports = {
    * 让 creep 去取能量（采集者之外的角色用）：优先掉落能量/容器，再去 source 现采。
    */
   gatherEnergy(creep) {
-    const dropped = creep.pos.findClosestByRange(FIND_DROPPED_RESOURCES, {
-      filter: (r) => r.resourceType === RESOURCE_ENERGY && r.amount > 50,
+    // 优先捡地上掉落（地上能量每 tick 被动衰减 1/1000，不捡就白白损耗）。
+    // 门槛从 50 降到 10：只要顺路有散料就捡，不让地上能量浪费；用 byPath 避免跨障碍误选。
+    let dropped = creep.pos.findClosestByPath(FIND_DROPPED_RESOURCES, {
+      filter: (r) => r.resourceType === RESOURCE_ENERGY && r.amount >= 10,
     });
     if (dropped) {
       if (this.work(creep, 'pickup', dropped) === ERR_NOT_IN_RANGE) this.moveTo(creep, dropped, '#ffaa00');
+      return;
+    }
+    // 顺手清 tombstone/废墟里的能量（死 creep 遗留）
+    const tomb = creep.pos.findClosestByPath(FIND_TOMBSTONES, { filter: (t) => t.store[RESOURCE_ENERGY] > 0 });
+    if (tomb) {
+      if (this.work(creep, 'withdraw', tomb, RESOURCE_ENERGY) === ERR_NOT_IN_RANGE) this.moveTo(creep, tomb, '#ffaa00');
       return;
     }
 

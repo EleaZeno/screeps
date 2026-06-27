@@ -1,0 +1,166 @@
+'use strict';
+
+/*
+ * remote.mining.js — 跨房外矿模块（V3 brain 架构原本缺失的一环）
+ * ==================================================================
+ * 背景：brain 主循环只处理 room.controller.my 的房间，creep 永远不离开出生房。
+ *       周边有无主空房（0 塔、无人守、有 source + 现成掉落/容器能量）= 免费外矿。
+ *       本模块让指定 home 房派"外矿队"去 target 房采矿/搬运，走原生 moveTo（自动跨房 + 复用路网）。
+ *
+ * 设计原则（不破坏现有效用/市场范式）：
+ *   - 完全独立：只新增本模块 + executor 两个 handler；不改 brain/market/blackboard/spawning 的核心。
+ *   - 安全第一：进 target 房前若探到带攻击部件的敌人 → 全队撤退回 home，不送死。
+ *   - 经济门控：home 房 RCL/能量不达标不派（外矿是锦上添花，不能拖垮本房）。
+ *   - 低 CPU：每 N tick 才做一次规划；creep 执行靠 memory 标记 + 原生寻路。
+ *
+ * creep 角色（memory.remote=true 标记，executor 识别 memory.taskType）：
+ *   - 'rharvest'：去 target 房钉某个 source 采矿（重 WORK）。采满就近丢进 container/地上。
+ *   - 'rhaul'   ：在 target 房捡能量（掉落>container>采矿者身上），运回 home 房 storage/spawn/controller。
+ *
+ * 配置：Memory.remote.routes = [{home, target, maxHarvest, maxHaul}]
+ *   不配置则用本文件 DEFAULT_ROUTES。
+ */
+
+const DEFAULT_ROUTES = [
+  // E9N54（你的第二房，正东相邻 E8N54）→ 外矿 E8N54（无主, 2 source, 0 塔, 现成 ~3500 能量）
+  { home: 'E9N54', target: 'E8N54', maxHarvest: 2, maxHaul: 3 },
+];
+
+// home 房经济门槛：低于这些不派外矿（避免拖垮本房发育）
+const MIN_HOME_RCL = 2;          // RCL 至少 2（能造像样的 body）
+const MIN_HOME_CREEPS = 6;       // 本房自己人口够了才外扩
+const REPLAN_INTERVAL = 25;      // 每 25 tick 规划一次（够人就不再生产）
+
+module.exports = {
+  /**
+   * 主入口：处理所有外矿路线。在 main 循环里、对每个 home 房调用一次（或全局调一次）。
+   * 这里做全局处理（遍历 routes），与 main 的 per-room 循环解耦。
+   */
+  run() {
+    // ⭐ 安全门控：外矿默认休眠。未显式启用不派任何队。
+    //   原因：单 spawn 的 RCL4 房处于 rcl_push 时，外矿会与本房争 spawn 时间、
+    //   并把 creep 送进未侦察的邻房。未经线上验证前不自动生效。
+    //   启用：Memory.remote.enabled = true（侦察确认 target 房无主无塔、本房能量富余后）。
+    if (!Memory.remote || !Memory.remote.enabled) return;
+    const routes = (Memory.remote && Memory.remote.routes) || DEFAULT_ROUTES;
+    if (!Memory.remote.routes) Memory.remote.routes = routes;
+
+    for (const route of routes) {
+      try { this._runRoute(route); } catch (e) { console.log('remote route err ' + route.home + '->' + route.target + ': ' + e); }
+    }
+
+    // ⭐ 驱动所有外矿 creep 的执行。关键：外矿 creep 在 target 房(非我的房)时，
+    // main 的 per-room 循环会 continue 跳过那个房 → executor.run 永远驱不到它们。
+    // 所以这里统一驱动全体外矿 creep(不管在哪个房)，保证跨房路上也有人推它走。
+    let executor; try { executor = require('executor'); } catch (e) { executor = null; }
+    if (executor) {
+      for (const name in Game.creeps) {
+        const c = Game.creeps[name];
+        if (c.memory && c.memory.remote && !c.spawning) {
+          try { executor.run(c); } catch (e) { console.log('remote exec err ' + name + ': ' + e); }
+        }
+      }
+    }
+  },
+
+  _runRoute(route) {
+    const home = Game.rooms[route.home];
+    if (!home || !home.controller || !home.controller.my) return; // home 不在视野/不是我的
+
+    // —— 经济门控：本房没发育起来不外扩 ——
+    const homeCreeps = home.find(FIND_MY_CREEPS);
+    if (home.controller.level < MIN_HOME_RCL) return;
+    if (homeCreeps.length < MIN_HOME_CREEPS) return;
+
+    // —— 本路线现役外矿 creep ——
+    const mine = _.filter(Game.creeps, (c) => c.memory.remote && c.memory.rHome === route.home && c.memory.rTarget === route.target);
+    const harvesters = mine.filter((c) => c.memory.taskType === 'rharvest');
+    const haulers = mine.filter((c) => c.memory.taskType === 'rhaul');
+
+    // —— 安全检查：target 房可见时，探到带攻击部件敌人 → 全队撤退 ——
+    const target = Game.rooms[route.target];
+    let danger = false;
+    if (target) {
+      const threats = target.find(FIND_HOSTILE_CREEPS, {
+        filter: (h) => h.getActiveBodyparts && (h.getActiveBodyparts(ATTACK) + h.getActiveBodyparts(RANGED_ATTACK)) > 0,
+      });
+      danger = threats.length > 0;
+    }
+    Memory.remote[route.target + ':danger'] = danger;
+    if (danger) {
+      // 撤退：标记所有本队 creep 回家避难（executor 看到 retreat 标记就往 home 撤）
+      for (const c of mine) c.memory.retreat = true;
+      return; // 危险期不再孵化
+    }
+    for (const c of mine) delete c.memory.retreat;
+
+    // —— 驱动现役 creep（执行交给 executor 的 rharvest/rhaul handler，这里只确保有任务标记）——
+    // target source 分配：把 harvester 钉到不同 source（按出生顺序轮流）
+    if (target) {
+      const srcs = target.find(FIND_SOURCES);
+      let i = 0;
+      for (const c of harvesters) {
+        if (!c.memory.rSource && srcs.length) { c.memory.rSource = srcs[i % srcs.length].id; i++; }
+      }
+    }
+
+    // —— 孵化（每 REPLAN_INTERVAL tick 评估一次缺口）——
+    if (Game.time % REPLAN_INTERVAL !== 0) return;
+    const idleSpawn = home.find(FIND_MY_SPAWNS, { filter: (s) => !s.spawning })[0];
+    if (!idleSpawn) return;
+
+    const cap = home.energyCapacityAvailable;
+    const cur = home.energyAvailable;
+
+    // 优先补 harvester（没人采就没货可搬），再补 hauler
+    if (harvesters.length < route.maxHarvest) {
+      const body = this._remoteMinerBody(cap);
+      if (cur >= this._cost(body)) {
+        idleSpawn.spawnCreep(body, 'RMiner_' + Game.time, {
+          memory: { remote: true, rHome: route.home, rTarget: route.target, taskType: 'rharvest', born: Game.time },
+        });
+      }
+      return;
+    }
+    if (haulers.length < route.maxHaul) {
+      const body = this._remoteHaulerBody(cap);
+      if (cur >= this._cost(body)) {
+        idleSpawn.spawnCreep(body, 'RHaul_' + Game.time, {
+          memory: { remote: true, rHome: route.home, rTarget: route.target, taskType: 'rhaul', born: Game.time },
+        });
+      }
+    }
+  },
+
+  /** 外矿矿工体：重 WORK + 1 CARRY + 足够 MOVE（外矿路远，要走得动）。
+   *  外矿无 spawn 喂，靠自己走过去，MOVE 配比要高些（背 WORK 在平原走）。 */
+  _remoteMinerBody(cap) {
+    // 目标 5 WORK 榨干 source；MOVE 按 (WORK+CARRY) 一半（平原每 2 part 1 MOVE）
+    let work = Math.min(5, Math.max(2, Math.floor((cap - 150) / 130)));
+    for (; work >= 2; work--) {
+      const moves = Math.max(2, Math.ceil((work + 1) / 2));
+      const cost = work * 100 + 50 + moves * 50;
+      if (cost <= cap) {
+        const b = [];
+        for (let i = 0; i < work; i++) b.push(WORK);
+        b.push(CARRY);
+        for (let i = 0; i < moves; i++) b.push(MOVE);
+        return b;
+      }
+    }
+    return [WORK, WORK, CARRY, MOVE, MOVE];
+  },
+
+  /** 外矿搬运体：成对 CARRY+MOVE（满速跑，外矿路远运量要大）。 */
+  _remoteHaulerBody(cap) {
+    const pairs = Math.max(2, Math.min(12, Math.floor(cap / 100)));
+    const b = [];
+    for (let i = 0; i < pairs; i++) { b.push(CARRY); b.push(MOVE); }
+    return b;
+  },
+
+  _cost(body) {
+    const c = { work: 100, carry: 50, move: 50, attack: 80, ranged_attack: 150, heal: 250, tough: 10, claim: 600 };
+    return body.reduce((s, p) => s + (c[p] || 0), 0);
+  },
+};
