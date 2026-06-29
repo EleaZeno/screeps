@@ -31,6 +31,8 @@ try { layoutPlanner = require('layout.planner'); } catch (e) { layoutPlanner = n
 // —— tower 主动控制（V3 架构原本缺失：没人指挥 tower 结构开火/治疗/维修）——
 let towerControl;
 try { towerControl = require('tower.control'); } catch (e) { towerControl = null; }
+let linkControl;
+try { linkControl = require('link.control'); } catch (e) { linkControl = null; }
 
 // —— Memory 自净：清理调试残留的 __xxx 顶层临时键 ——
 // 控制台调试/autopilot 会往 Memory 写一次性 __probe/__diag/__autopilot 等 scratch 键，
@@ -64,6 +66,8 @@ module.exports.loop = function () {
     // 0a. 防御层：主动驱动 tower（攻击敌人 > 治疗友军 > 和平期维修）。
     // 放在最前：tower 反应速度直接决定房间被打时能否扛住。CPU 极低。
     if (towerControl) { try { towerControl.run(room); } catch (e) { console.log('tower err ' + e); } }
+    // 0b. 能量层：RCL5+ link 瞬移（source→controller/storage），不下令 link 就是死能量。
+    if (linkControl) { try { linkControl.run(room); } catch (e) { console.log('link err ' + e); } }
 
     // 0. 工程规划层：主动布局基建（这让大脑"会运筹"——多建 container/扩展/修路/规划布局）
     // build.planner 内部每20tick、layout 每100tick 才真跑，CPU 极低。产出的工地由市场派人建。
