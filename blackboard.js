@@ -30,6 +30,7 @@ module.exports = {
     this._collectHarvest(room, tasks);
     this._collectHaul(room, tasks);
     this._collectFill(room, tasks);
+    this._collectStore(room, tasks);
     this._collectUpgrade(room, tasks);
     this._collectBuild(room, tasks);
     this._collectRepair(room, tasks);
@@ -50,12 +51,25 @@ module.exports = {
     for (const slot of slots) {
       (bySource[slot.sourceId] = bySource[slot.sourceId] || []).push(slot);
     }
+    // ⭐ 修复 2026-06-30：预先收集所有 container 坐标（一次遍历，O(结构数)），
+    //   用于让开采格优先选【脚下有 container 的格】，矿工采的能量直接进 container。
+    const contKeys = {};
+    room.find(FIND_STRUCTURES, { filter: (s) => s.structureType === STRUCTURE_CONTAINER })
+      .forEach((c) => { contKeys[c.pos.x + ',' + c.pos.y] = 1; });
     for (const sid in bySource) {
       const source = Game.getObjectById(sid);
       if (!source) continue;
       const fill = source.energy / Math.max(1, source.energyCapacity);
-      // 取离 spawn 最近的 maxPerSource 个格（slot.dist 已由 scheduler 预算）
-      const chosen = bySource[sid].sort((a, b) => (a.dist || 0) - (b.dist || 0)).slice(0, maxPerSource);
+      // 有 container 的开采格排前（让矿工站上去，能量 transfer 进脚下 container = 静态采矿成立）；
+      // 同类再按 spawn 距离近优先。这修正了原“只按距离选格 → 跟 container 实际位置错开 →
+      // 矿工站空格、container 永远 0”的根因。
+      const sortedSlots = bySource[sid].slice().sort((a, b) => {
+        const ca = contKeys[a.x + ',' + a.y] ? 0 : 1;
+        const cb = contKeys[b.x + ',' + b.y] ? 0 : 1;
+        if (ca !== cb) return ca - cb;
+        return (a.dist || 0) - (b.dist || 0);
+      });
+      const chosen = sortedSlots.slice(0, maxPerSource);
       for (const slot of chosen) {
         tasks.push({
           id: `harvest:${slot.x},${slot.y}`,
@@ -128,6 +142,47 @@ module.exports = {
     }
   },
 
+  /** ⭐ 屯仓任务（修复 2026-06-30）：把 container/掉落里的富余能量辐进 storage 储备。
+   *  这是物流链的【出口】：原来 Filler 只会填 spawn/extension(永远有空位)，
+   *  能量在“采→填extension→孵化→再采”小循环里空转，storage 永远 0、升不动 RCL5→6。
+   *  只在【spawn/extension 都填满】且【能量源有富余】时才开，保证不抢孵化命脉。 */
+  _collectStore(room, tasks) {
+    const storage = room.storage;
+    if (!storage || storage.store.getFreeCapacity(RESOURCE_ENERGY) <= 0) return;
+    // 闸门（修订 2026-06-30）：spawn 必须满 + extension 填充率 ≥ 90% 才屯仓。
+    //   原逻辑“任一 extension 差 1 点就不屯仓”太挑剔：22 个 extension 总有一两个在被
+      //   消耗的瞬间没满 → store 任务长期不生成 → storage 永远積不起来。
+      //   改为“绝大部分孵化位已满”即放行屯仓，既保孵化命脉又让富余能量持续进 storage。
+    const spawns = room.find(FIND_MY_STRUCTURES, { filter: (s) => s.structureType === STRUCTURE_SPAWN });
+    const spawnHungry = spawns.some((s) => s.store.getFreeCapacity(RESOURCE_ENERGY) > 0);
+    if (spawnHungry) return; // spawn 未满绝对优先填 spawn，不屯仓
+    const exts = room.find(FIND_MY_STRUCTURES, { filter: (s) => s.structureType === STRUCTURE_EXTENSION });
+    if (exts.length > 0) {
+      let full = 0;
+      for (const e of exts) if (e.store.getFreeCapacity(RESOURCE_ENERGY) === 0) full++;
+      // ★ 配时旋钮：门槛由基因 storeExtFull 决定（不再写死 0.9）。
+      const _g = (Memory.brain && Memory.brain.genome && Memory.brain.genome.genes) || {};
+      const extFullGate = (typeof _g.storeExtFull === 'number' && isFinite(_g.storeExtFull)) ? _g.storeExtFull : 0.9;
+      if (full / exts.length < extFullGate) return; // extension 填充率未达门槛 → 先保孵化位
+    }
+    // 能量源富余：container 有货或地上有散料才值得派人屯。
+    let supply = 0;
+    room.find(FIND_STRUCTURES, { filter: (s) => s.structureType === STRUCTURE_CONTAINER })
+      .forEach((c) => { supply += c.store[RESOURCE_ENERGY] || 0; });
+    room.find(FIND_DROPPED_RESOURCES, { filter: (r) => r.resourceType === RESOURCE_ENERGY })
+      .forEach((r) => { supply += r.amount; });
+    if (supply < 100) return; // 源头没货，不生成屯仓任务
+    tasks.push({
+      id: `store:${storage.id}`,
+      type: 'store',
+      targetId: storage.id,
+      pos: { x: storage.pos.x, y: storage.pos.y, roomName: room.name },
+      baseValue: 55, // 低于 fill(95)/upgrade，高于空闲；只在孵化满足后吸走过剩能量
+      capacity: Math.min(4, Math.max(1, Math.ceil(supply / 1000))),
+      meta: {},
+    });
+  },
+
   /** 升级任务：controller 永远可升级。价值由战略层权重主导。 */
   _collectUpgrade(room, tasks) {
     const ctrl = room.controller;
@@ -180,9 +235,12 @@ module.exports = {
     const sites = room.find(FIND_MY_CONSTRUCTION_SITES);
     for (const site of sites) {
       // 重要建筑（extension/container/tower/spawn）价值更高
+      // ⭐ 2026-07-01: link 设为高价值(82)。link 是能量物流的效率解锁器(source→storage/controller
+      //   瞬移)，但能量紧张时按默认45会永远抢不过 fill(95)/upgrade → 工地卡死(线上实测
+      //   storage link 卡 4786/5000 数十 tick 无人建)。提到 storage 级别，确保被优先建成。
       const importance = {
         [STRUCTURE_SPAWN]: 90, [STRUCTURE_EXTENSION]: 70, [STRUCTURE_TOWER]: 75,
-        [STRUCTURE_CONTAINER]: 65, [STRUCTURE_STORAGE]: 80, [STRUCTURE_ROAD]: 35,
+        [STRUCTURE_CONTAINER]: 65, [STRUCTURE_STORAGE]: 80, [STRUCTURE_LINK]: 82, [STRUCTURE_ROAD]: 35,
       }[site.structureType] || 45;
       tasks.push({
         id: `build:${site.id}`,
@@ -207,8 +265,17 @@ module.exports = {
         return s.hits < s.hitsMax * thresh;
       },
     });
+    // ★ 修复 2026-06-30【Repairer 军队挤压升级】：有 tower 时，轻微衰减交给 tower 自动修，
+    //   只给 worker 生成「严重受损(超 repairWorkerThresh)」的 repair 任务。这从源头削掉
+    //   虚高的 repair 缺口(原本每个衰减的路/container 都生任务 → gap 2000+ 霸占 topType)。
+    //   阈值由基因 repairWorkerThresh 决定(不写死)。无 tower 时不门控(原逻辑)。
+    const _gr = (Memory.brain && Memory.brain.genome && Memory.brain.genome.genes) || {};
+    const repThresh = (typeof _gr.repairWorkerThresh === 'number' && isFinite(_gr.repairWorkerThresh)) ? _gr.repairWorkerThresh : 0.5;
+    const hasTower = room.find(FIND_MY_STRUCTURES, { filter: (s) => s.structureType === STRUCTURE_TOWER }).length > 0;
     for (const s of damaged) {
       const dmgRatio = 1 - s.hits / s.hitsMax;
+      // 有 tower 且受损未超阈 → 交给 tower，不给 worker 生任务(避免 Repairer 军队)
+      if (hasTower && dmgRatio < repThresh) continue;
       const isContainer = s.structureType === STRUCTURE_CONTAINER;
       tasks.push({
         id: `repair:${s.id}`,
