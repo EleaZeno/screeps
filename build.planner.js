@@ -188,25 +188,89 @@ module.exports = {
     }
   },
 
-  /** link：优先 controller 旁、storage 旁、各 source 旁，每处 1 个，总数不超 target */
+  /** link（RCL5+）：按优先级排——controller link（喂 upgrader，收益最高）> storage link（兑底）> source link。
+   *  关键：source link 必须放在矿工开采格相邻(range1)格上，否则矿工灌不进去=死 link。
+   *  link.control 需 ≥2 个 link 才能瞬移，所以优先保证 controller+storage 这对接收方先到位。 */
   planLinks(room, target) {
     const have = this.countStructAndSites(room, STRUCTURE_LINK);
     if (have >= target) return;
-    const anchors = [];
-    if (room.controller) anchors.push(room.controller.pos);
-    if (room.storage) anchors.push(room.storage.pos);
-    room.find(FIND_SOURCES).forEach((s) => anchors.push(s.pos));
     let placed = have;
-    for (const a of anchors) {
-      if (placed >= target) break;
-      const near = a.findInRange(FIND_STRUCTURES, 2, { filter: (s) => s.structureType === STRUCTURE_LINK });
-      const nearS = a.findInRange(FIND_CONSTRUCTION_SITES, 2, { filter: (s) => s.structureType === STRUCTURE_LINK });
-      if (near.length === 0 && nearS.length === 0) {
+
+    // 优先级 1: controller link（直接喂 upgrade，rcl_push 目标下收益最高）
+    if (placed < target && room.controller) {
+      if (this._noLinkNear(room, room.controller.pos)) {
         const before = this.countStructAndSites(room, STRUCTURE_LINK);
-        this.placeAround(room, a, STRUCTURE_LINK, 1, 2);
+        this.placeAround(room, room.controller.pos, STRUCTURE_LINK, 1, 2);
+        if (this.countStructAndSites(room, STRUCTURE_LINK) > before) placed++;
+      } else { /* 已有 */ }
+    }
+    // 优先级 2: storage link（兑底接收方，hauler 短驳）
+    if (placed < target && room.storage) {
+      if (this._noLinkNear(room, room.storage.pos)) {
+        const before = this.countStructAndSites(room, STRUCTURE_LINK);
+        this.placeAround(room, room.storage.pos, STRUCTURE_LINK, 1, 2);
         if (this.countStructAndSites(room, STRUCTURE_LINK) > before) placed++;
       }
     }
+    // 优先级 3: source link——只放在某开采格相邻空格（矿工能 range1 灌进去）。
+    //   无可达空格则不放（宁缺勿滥：放了也是死 link）。
+    if (placed < target) {
+      const sources = room.find(FIND_SOURCES);
+      for (const s of sources) {
+        if (placed >= target) break;
+        if (!this._noLinkNear(room, s.pos)) continue; // 该 source 旁已有 link/工地
+        const spot = this._sourceLinkSpot(room, s);
+        if (!spot) continue;
+        if (room.createConstructionSite(spot.x, spot.y, STRUCTURE_LINK) === OK) {
+          placed++;
+          console.log('[BUILD] source link @' + spot.x + ',' + spot.y + ' (歗开采格)');
+        }
+      }
+    }
+  },
+
+  /** 锁定位置 range2 内是否已有 link 或 link 工地 */
+  _noLinkNear(room, pos) {
+    const near = pos.findInRange(FIND_STRUCTURES, 2, { filter: (s) => s.structureType === STRUCTURE_LINK });
+    const nearS = pos.findInRange(FIND_CONSTRUCTION_SITES, 2, { filter: (s) => s.structureType === STRUCTURE_LINK });
+    return near.length === 0 && nearS.length === 0;
+  },
+
+  /** 为 source 选一个 source link 位：在开采格(矿工站位)相邻、非开采格本身、空闲、不压 source 的格。 */
+  _sourceLinkSpot(room, source) {
+    const terrain = room.getTerrain();
+    const slots = (room.memory.slots && room.memory.slots.bySource && room.memory.slots.bySource[source.id]) || [];
+    // 候选开采格：优先用缓存的开采格，否则现算 source 周边 8 格
+    let harvestTiles = slots.map((s) => ({ x: s.x, y: s.y }));
+    if (!harvestTiles.length) {
+      for (let dx = -1; dx <= 1; dx++) for (let dy = -1; dy <= 1; dy++) {
+        if (!dx && !dy) continue;
+        const x = source.pos.x + dx, y = source.pos.y + dy;
+        if (x < 1 || x > 48 || y < 1 || y > 48) continue;
+        if (terrain.get(x, y) === TERRAIN_MASK_WALL) continue;
+        harvestTiles.push({ x, y });
+      }
+    }
+    const occupied = (x, y) => {
+      const pos = new RoomPosition(x, y, room.name);
+      const here = pos.lookFor(LOOK_STRUCTURES).concat(pos.lookFor(LOOK_CONSTRUCTION_SITES));
+      return here.length > 0;
+    };
+    const isHarvestTile = (x, y) => harvestTiles.some((t) => t.x === x && t.y === y);
+    // 在某开采格相邻找一个空格（不是开采格本身、不是 source、不是墙、未占）
+    for (const ht of harvestTiles) {
+      for (let dx = -1; dx <= 1; dx++) for (let dy = -1; dy <= 1; dy++) {
+        if (!dx && !dy) continue;
+        const x = ht.x + dx, y = ht.y + dy;
+        if (x < 2 || x > 47 || y < 2 || y > 47) continue;
+        if (terrain.get(x, y) === TERRAIN_MASK_WALL) continue;
+        if (x === source.pos.x && y === source.pos.y) continue;
+        if (isHarvestTile(x, y)) continue;       // 不压其他开采格
+        if (occupied(x, y)) continue;
+        return { x, y };
+      }
+    }
+    return null;
   },
 
   /** extractor 必须盖在 mineral 上 */

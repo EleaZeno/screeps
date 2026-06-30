@@ -102,6 +102,12 @@ module.exports = {
       for (const c of harvesters) {
         if (!c.memory.rSource && srcs.length) { c.memory.rSource = srcs[i % srcs.length].id; i++; }
       }
+      // —— 阶段3 外矿提效：低频铺路网 + target 房 source 旁建 container ——
+      // 只在 target 可见时做，且低频（避免每 tick 扫）；CPU 微。
+      if (Game.time % 50 === 0) {
+        try { this._planRemoteContainers(target, srcs); } catch (e) { /* 不影响主逻辑 */ }
+        try { this._planRouteRoads(home, target); } catch (e) { /* 同上 */ }
+      }
     }
 
     // —— 孵化（每 REPLAN_INTERVAL tick 评估一次缺口）——
@@ -128,6 +134,74 @@ module.exports = {
         idleSpawn.spawnCreep(body, 'RHaul_' + Game.time, {
           memory: { remote: true, rHome: route.home, rTarget: route.target, taskType: 'rhaul', born: Game.time },
         });
+      }
+    }
+  },
+
+  /** 阶段3(a)：target 房每个 source 旁建一个 container（矿工采满丢 container，hauler 整仓搬，减空跑）。
+   *  外矿房是无主房，可以在里面建 container（不需控制权）。每 source 只建 1 个，已有则跳过。 */
+  _planRemoteContainers(target, srcs) {
+    if (!target || !srcs || !srcs.length) return;
+    const terrain = target.getTerrain();
+    for (const src of srcs) {
+      // 该 source range1 已有 container/工地则跳过
+      const near = src.pos.findInRange(FIND_STRUCTURES, 1, { filter: (s) => s.structureType === STRUCTURE_CONTAINER });
+      const nearS = src.pos.findInRange(FIND_CONSTRUCTION_SITES, 1, { filter: (s) => s.structureType === STRUCTURE_CONTAINER });
+      if (near.length || nearS.length) continue;
+      // 在 source 周边找一个可站空格建 container
+      let done = false;
+      for (let dx = -1; dx <= 1 && !done; dx++) for (let dy = -1; dy <= 1 && !done; dy++) {
+        if (!dx && !dy) continue;
+        const x = src.pos.x + dx, y = src.pos.y + dy;
+        if (x < 1 || x > 48 || y < 1 || y > 48) continue;
+        if (terrain.get(x, y) === TERRAIN_MASK_WALL) continue;
+        const pos = new RoomPosition(x, y, target.name);
+        const here = pos.lookFor(LOOK_STRUCTURES).concat(pos.lookFor(LOOK_CONSTRUCTION_SITES));
+        if (here.length) continue;
+        if (target.createConstructionSite(x, y, STRUCTURE_CONTAINER) === OK) {
+          console.log('[REMOTE] container @' + x + ',' + y + ' (' + target.name + ' source旁)');
+          done = true;
+        }
+      }
+    }
+  },
+
+  /** 阶段3(b)：home spawn → target 每个 source 的路径上铺 road（hauler 走路网移动减半=运力翻倍）。
+   *  跨房用 PathFinder 算路径；只在可见房间内的格建工地（不可见房间建不了）。
+   *  低频 + 上限工地数，避免压城/抽能量。 */
+  _planRouteRoads(home, target) {
+    if (!home || !target) return;
+    const homeSpawn = home.find(FIND_MY_SPAWNS)[0];
+    if (!homeSpawn) return;
+    // 控制总工地数：两房加起来外矿路工地 ≥6 就不再排（先修完再说）
+    const roadSites = (r) => r.find(FIND_CONSTRUCTION_SITES, { filter: (s) => s.structureType === STRUCTURE_ROAD }).length;
+    if (roadSites(home) + roadSites(target) >= 6) return;
+    let budget = 3;
+    const srcs = target.find(FIND_SOURCES);
+    for (const src of srcs) {
+      if (budget <= 0) break;
+      const ret = PathFinder.search(homeSpawn.pos, { pos: src.pos, range: 1 }, {
+        plainCost: 2, swampCost: 5, maxOps: 4000,
+        roomCallback: (rn) => {
+          const rm = Game.rooms[rn];
+          if (!rm) return undefined;
+          const cm = new PathFinder.CostMatrix();
+          rm.find(FIND_STRUCTURES).forEach((s) => {
+            if (s.structureType === STRUCTURE_ROAD) cm.set(s.pos.x, s.pos.y, 1);
+          });
+          return cm;
+        },
+      });
+      if (ret.incomplete) continue;
+      for (const step of ret.path) {
+        if (budget <= 0) break;
+        const rm = Game.rooms[step.roomName];
+        if (!rm) continue;                       // 不可见房间跳过
+        const pos = new RoomPosition(step.x, step.y, step.roomName);
+        const here = pos.lookFor(LOOK_STRUCTURES).concat(pos.lookFor(LOOK_CONSTRUCTION_SITES));
+        if (here.some((s) => s.structureType === STRUCTURE_ROAD)) continue;
+        if (here.some((s) => s.structureType !== STRUCTURE_ROAD && s.structureType !== STRUCTURE_RAMPART && s.structureType !== STRUCTURE_CONTAINER)) continue;
+        if (rm.createConstructionSite(step.x, step.y, STRUCTURE_ROAD) === OK) budget--;
       }
     }
   },

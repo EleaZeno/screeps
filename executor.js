@@ -18,6 +18,16 @@ module.exports = {
     if (creep.memory.remote) { this._remote(creep, utils); return; }
     const type = creep.memory.taskType;
     const target = creep.memory.taskTarget ? Game.getObjectById(creep.memory.taskTarget) : null;
+    // ⭐ 修复 2026-06-30：专职矿工被 market 弹出(fitness=0 不接非采矿活)时，不走 _idle
+    //   (会去升级/gatherEnergy)，而是回自己的 slot 继续静采。防止矿工断采去干别的。
+    if (!type && creep.memory.slot) {
+      const p = require('worldmodel').parts(creep);
+      if (p.work >= 3 && p.carry <= 1) {
+        const src = creep.memory.slot.sourceId ? Game.getObjectById(creep.memory.slot.sourceId) : null;
+        this._handlers.harvest(creep, src || creep.pos.findClosestByRange(FIND_SOURCES), utils);
+        return;
+      }
+    }
     const fn = this._handlers[type];
     if (fn && target !== undefined) {
       fn(creep, target, utils);
@@ -116,15 +126,40 @@ module.exports = {
   _handlers: {
     harvest(creep, source, utils) {
       if (!source) return;
+      const p = require('worldmodel').parts(creep);
       // 站到开采格上采（能量掉进 container），无格则就近采
       const slot = creep.memory.slot;
       if (slot && !(creep.pos.x === slot.x && creep.pos.y === slot.y)) {
         utils.moveTo(creep, new RoomPosition(slot.x, slot.y, creep.room.name), '#ffaa00');
         // 顺路如果已在 range 内也采一下
         if (creep.pos.isNearTo(source)) utils.work(creep, 'harvest', source);
-      } else {
-        if (utils.work(creep, 'harvest', source) === ERR_NOT_IN_RANGE) utils.moveTo(creep, source, '#ffaa00');
+        return;
       }
+      // ⭐ 静态采矿核心动作（修复 2026-06-30）：重 WORK 矿工(5W 1C)采矿吞吐 10e/tick，
+      // 但自身只有 1 CARRY(50)，~5 tick 就满。Screeps 机制：harvest 的能量先进 creep
+      // 的 store，store 满后【溢出才掉进脚下 container】。所以矿工必须先把 store 主动
+      // transfer 进脚下 container（或链接 link），腾空再采，container 才会被填满。
+      // 缺这一步 → 矿工采满 50 卡死、container 永远 0（这就是用户看到的根因）。
+      if (p.work > 0 && p.carry > 0 && creep.store.getFreeCapacity(RESOURCE_ENERGY) === 0) {
+        // 脚下/相邻的 container 或 link：把满仓能量倒进去，腾出 CARRY 继续采
+        // 优先脚下同格（静态采矿 container），其次相邻 link（source link，喂瞬移网）。
+        const here = creep.pos.lookFor(LOOK_STRUCTURES);
+        let sink = here.find(
+          (s) => (s.structureType === STRUCTURE_CONTAINER || s.structureType === STRUCTURE_LINK) &&
+            s.store.getFreeCapacity(RESOURCE_ENERGY) > 0);
+        // 脚下没空位 sink → 找相邻(range 1) link（source link 常放在开采格旁，灌它进瞬移网）
+        if (!sink) {
+          const near = creep.pos.findInRange(FIND_MY_STRUCTURES, 1, {
+            filter: (s) => s.structureType === STRUCTURE_LINK && s.store.getFreeCapacity(RESOURCE_ENERGY) > 0,
+          });
+          if (near && near.length) sink = near[0];
+        }
+        if (sink) { utils.work(creep, 'transfer', sink, RESOURCE_ENERGY); return; }
+        // 脚下没 sink → 就地 drop（让 hauler 来捡），也好过卡死不动
+        creep.drop(RESOURCE_ENERGY);
+        return;
+      }
+      if (utils.work(creep, 'harvest', source) === ERR_NOT_IN_RANGE) utils.moveTo(creep, source, '#ffaa00');
     },
 
     haul(creep, src, utils) {
@@ -156,6 +191,13 @@ module.exports = {
       if (!module.exports._loaded(creep, utils)) { module.exports._refill(creep, utils); return; }
       if (!struct) return;
       if (utils.work(creep, 'transfer', struct, RESOURCE_ENERGY) === ERR_NOT_IN_RANGE) utils.moveTo(creep, struct, '#ffffff');
+    },
+
+    // ⭐ 屯仓（修复 2026-06-30）：装满能量送进 storage 储备。与 fill 同机制，只是目标是 storage。
+    store(creep, storage, utils) {
+      if (!module.exports._loaded(creep, utils)) { module.exports._refill(creep, utils); return; }
+      if (!storage) return;
+      if (utils.work(creep, 'transfer', storage, RESOURCE_ENERGY) === ERR_NOT_IN_RANGE) utils.moveTo(creep, storage, '#ffffff');
     },
 
     upgrade(creep, ctrl, utils) {

@@ -33,6 +33,9 @@ let towerControl;
 try { towerControl = require('tower.control'); } catch (e) { towerControl = null; }
 let linkControl;
 try { linkControl = require('link.control'); } catch (e) { linkControl = null; }
+// —— 经济变现层（RCL6+ terminal 就位后自动卖矿/余量能量换 credits；无 terminal 休眠）——
+let econMarket;
+try { econMarket = require('econ.market'); } catch (e) { econMarket = null; }
 
 // —— Memory 自净：清理调试残留的 __xxx 顶层临时键 ——
 // 控制台调试/autopilot 会往 Memory 写一次性 __probe/__diag/__autopilot 等 scratch 键，
@@ -68,6 +71,8 @@ module.exports.loop = function () {
     if (towerControl) { try { towerControl.run(room); } catch (e) { console.log('tower err ' + e); } }
     // 0b. 能量层：RCL5+ link 瞬移（source→controller/storage），不下令 link 就是死能量。
     if (linkControl) { try { linkControl.run(room); } catch (e) { console.log('link err ' + e); } }
+    // 0c. 经济层：RCL6+ terminal 卖矿/余量能量换 credits（无 terminal 自动休眠，低频 50tick）。
+    if (econMarket) { try { econMarket.run(room); } catch (e) { console.log('econ err ' + e); } }
 
     // 0. 工程规划层：主动布局基建（这让大脑"会运筹"——多建 container/扩展/修路/规划布局）
     // build.planner 内部每20tick、layout 每100tick 才真跑，CPU 极低。产出的工地由市场派人建。
