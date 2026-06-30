@@ -95,6 +95,18 @@ module.exports = {
     }).forEach((s) => sources.push({ id: s.id, pos: s.pos, amount: s.store[RESOURCE_ENERGY], kind: 'container' }));
     room.find(FIND_TOMBSTONES, { filter: (t) => t.store[RESOURCE_ENERGY] > 0 })
       .forEach((t) => sources.push({ id: t.id, pos: t.pos, amount: t.store[RESOURCE_ENERGY], kind: 'tomb' }));
+    // ⭐ 2026-07-01: storage link 是物流链最后一环。link.control 把 source link 能量瞬移到
+    //   storage link, 但 link 本身不会自动倒进 storage 结构 → 实测 storage link 攒到 776
+    //   却 storageE=0。把【storage 旁的 link】(非 controller link, 那个直接喂 upgrader)
+    //   挂为 haul 源, 让 hauler withdraw 后经 findEnergyDropOff 送进 storage, 打通最后2格。
+    if (room.storage) {
+      room.find(FIND_MY_STRUCTURES, {
+        filter: (s) => s.structureType === STRUCTURE_LINK &&
+          s.store[RESOURCE_ENERGY] > 50 &&
+          s.pos.inRangeTo(room.storage, 2) &&
+          !(room.controller && s.pos.inRangeTo(room.controller, 2)), // controller link 不抽(留给升级)
+      }).forEach((s) => sources.push({ id: s.id, pos: s.pos, amount: s.store[RESOURCE_ENERGY], kind: 'storageLink' }));
+    }
 
     for (const s of sources) {
       // 能量越多越该搬（避免 container 溢出浪费）；capacity 随量缩放。
