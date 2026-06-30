@@ -71,7 +71,7 @@ module.exports = {
     // ⭐ 接通进化基因：基础权重不再写死，由 genome 进化决定（修复进化空转）
     const G = this._genes(b);
     const w = {
-      harvest: G.harvestBase, haul: G.haulBase, fill: 1.0,
+      harvest: G.harvestBase, haul: G.haulBase, fill: 1.0, store: 0.7,
       upgrade: 1.0, build: 1.0, repair: 0.8, defend: 0.01,
     };
 
@@ -125,10 +125,25 @@ module.exports = {
     // 算剩余总工程量，工地快完了就平滑把重心从 build 移向 upgrade（不浪费 tick）
     let remainWork = 0;
     for (const s of sites) remainWork += (s.progressTotal - s.progress);
+    // ⭐ 2026-07-01 keystone 检测: storage/controller 旁的 link 是能量物流总开关。
+    //   有这种工地时, build 不能被 ramp/spendCap 压到饿死(线上实测 link 卡 4786/5000)。
+    let hasKeystone = false;
+    const _LINK = (typeof STRUCTURE_LINK !== 'undefined') ? STRUCTURE_LINK : 'link';
+    for (const s of sites) {
+      if (s.structureType === _LINK && s.pos && s.pos.inRangeTo) {
+        if ((room.storage && s.pos.inRangeTo(room.storage, 2)) ||
+            (room.controller && s.pos.inRangeTo(room.controller, 2))) { hasKeystone = true; break; }
+      }
+    }
     if (nSites > 0) {
       // 剩余工程多 → build 高；剩余少(快完工) → build 平滑下降。斜率由进化基因 buildUrgency 决定。
       const buildRamp = ramp(remainWork, 200, 3000); // 工程量 200..3000 映射强度
       w.build = 0.8 + buildRamp * (G.buildUrgency + 0.4);   // 激进：建造发力更猛
+      // ⭐ 修复 2026-07-01: 旧 bug=快完工(remainWork小)→buildRamp≈0→build权重≈0.8 再被 spendCap
+      //   压到 0.32 → 96% 的工地永远没人建完(线上实测 link 卡 4786/5000)。
+      //   给"工地存在"一个 build 地板(2.0), keystone 工地给压倒性权重(5.0)确保插队建成。
+      if (hasKeystone) w.build = Math.max(w.build, 5.0);
+      else w.build = Math.max(w.build, 2.0);
       // 工地存在时 upgrade 基础压低，但降级风险通过 downgradeBoost 顶上来
       w.upgrade = 0.6 + (1 - buildRamp) * 0.8 + downgradeBoost;
     } else {
@@ -188,10 +203,13 @@ module.exports = {
       // ⭐ 激进改造：原硜上限 1.5x 压死建设/升级，能量囤再多也烧不出去。
       // 改为动态上限：能量越囤积（当前能量满+storage存货多），升级/建造越该狂烧（到 4x）。
       // 这是“能量产出>消费”的客观经济事实要求增加消费端，而非调参。
-      const backlogRatio = Math.min(1, energyFill * 0.4 + ramp(stored, 0, 20000) * 0.6);
+      // ★ 配时旋钮：storage 囤积对烧钱上限的放大权重由基因 spendBacklogK 决定（不再写死 0.6）。
+      const _k = (typeof G.spendBacklogK === 'number' && isFinite(G.spendBacklogK)) ? G.spendBacklogK : 0.6;
+      const backlogRatio = Math.min(1, energyFill * (1 - _k) + ramp(stored, 0, 20000) * _k);
       const spendCap = 1.5 + backlogRatio * 2.5; // 1.5x(缺能) .. 4.0x(囤积狂烧)
       w.upgrade = Math.min(w.upgrade, harvestFloor * spendCap);
-      w.build = Math.min(w.build, harvestFloor * spendCap);
+      // ⭐ keystone build(物流总开关一次性建成)豁免 spendCap 钳制; 普通 build 仍受约束防失业
+      if (!hasKeystone) w.build = Math.min(w.build, harvestFloor * spendCap);
       b._diag.spendCap = Math.round(spendCap * 100) / 100;
     }
 
