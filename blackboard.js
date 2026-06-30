@@ -235,13 +235,20 @@ module.exports = {
     const sites = room.find(FIND_MY_CONSTRUCTION_SITES);
     for (const site of sites) {
       // 重要建筑（extension/container/tower/spawn）价值更高
-      // ⭐ 2026-07-01: link 设为高价值(82)。link 是能量物流的效率解锁器(source→storage/controller
-      //   瞬移)，但能量紧张时按默认45会永远抢不过 fill(95)/upgrade → 工地卡死(线上实测
-      //   storage link 卡 4786/5000 数十 tick 无人建)。提到 storage 级别，确保被优先建成。
-      const importance = {
+      let importance = {
         [STRUCTURE_SPAWN]: 90, [STRUCTURE_EXTENSION]: 70, [STRUCTURE_TOWER]: 75,
         [STRUCTURE_CONTAINER]: 65, [STRUCTURE_STORAGE]: 80, [STRUCTURE_LINK]: 82, [STRUCTURE_ROAD]: 35,
       }[site.structureType] || 45;
+      // ⭐ 2026-07-01 keystone link: storage/controller 旁的 link 是能量物流效率总开关
+      //   (source→storage/controller 瞬移)。但 fill(95) 因 30 ext 总有一个不满而永远存在,
+      //   build(82) 永远抢不过 → 工地卡死(线上实测 storage link 卡 4786/5000 数十 tick)。
+      //   故 keystone link 提到 96(刚超 fill) 让它一次性插队建成; 建成后无此工地, 恢复常态。
+      //   source link 保持 82(不扰孵化 spawn fill)。
+      if (site.structureType === STRUCTURE_LINK) {
+        const nearStorage = room.storage && site.pos.inRangeTo(room.storage, 2);
+        const nearCtrl = room.controller && site.pos.inRangeTo(room.controller, 2);
+        if (nearStorage || nearCtrl) importance = 96;
+      }
       tasks.push({
         id: `build:${site.id}`,
         type: 'build',
