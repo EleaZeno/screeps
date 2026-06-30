@@ -123,6 +123,36 @@ module.exports = {
     if (r === ERR_NOT_IN_RANGE) utils.moveTo(creep, dst, '#ffffff');
   },
 
+  /**
+   * ⭐ 为静态矿工找倒货 sink（2026-07-01）。优先级：
+   *   1) 相邻(range1) source link 有空 —— 能瞬移到 controller/storage link，最高价值
+   *   2) 脚下同格 container 有空 —— 就地静态存储，hauler 来搬
+   *   3) 相邻(range1) container 有空 —— 兜底
+   * 用 _linkFree/_contFree 做稳健空位判断（link 的 getFreeCapacity 偶发返回 null）。
+   * @returns {Structure|null}
+   */
+  _harvestSink(creep) {
+    const linkFree = (s) => {
+      const cap = (s.store.getCapacity && s.store.getCapacity(RESOURCE_ENERGY)) || 800;
+      return cap - (s.store[RESOURCE_ENERGY] || 0);
+    };
+    // 1) 相邻 source link
+    const links = creep.pos.findInRange(FIND_MY_STRUCTURES, 1, {
+      filter: (s) => s.structureType === STRUCTURE_LINK && linkFree(s) > 0,
+    });
+    if (links && links.length) return links[0];
+    // 2) 脚下同格 container
+    const here = creep.pos.lookFor(LOOK_STRUCTURES).find(
+      (s) => s.structureType === STRUCTURE_CONTAINER && (s.store.getFreeCapacity(RESOURCE_ENERGY) || 0) > 0);
+    if (here) return here;
+    // 3) 相邻 container 兜底
+    const conts = creep.pos.findInRange(FIND_STRUCTURES, 1, {
+      filter: (s) => s.structureType === STRUCTURE_CONTAINER && (s.store.getFreeCapacity(RESOURCE_ENERGY) || 0) > 0,
+    });
+    if (conts && conts.length) return conts[0];
+    return null;
+  },
+
   _handlers: {
     harvest(creep, source, utils) {
       if (!source) return;
@@ -135,29 +165,22 @@ module.exports = {
         if (creep.pos.isNearTo(source)) utils.work(creep, 'harvest', source);
         return;
       }
-      // ⭐ 静态采矿核心动作（修复 2026-06-30）：重 WORK 矿工(5W 1C)采矿吞吐 10e/tick，
-      // 但自身只有 1 CARRY(50)，~5 tick 就满。Screeps 机制：harvest 的能量先进 creep
-      // 的 store，store 满后【溢出才掉进脚下 container】。所以矿工必须先把 store 主动
-      // transfer 进脚下 container（或链接 link），腾空再采，container 才会被填满。
-      // 缺这一步 → 矿工采满 50 卡死、container 永远 0（这就是用户看到的根因）。
-      if (p.work > 0 && p.carry > 0 && creep.store.getFreeCapacity(RESOURCE_ENERGY) === 0) {
-        // 脚下/相邻的 container 或 link：把满仓能量倒进去，腾出 CARRY 继续采
-        // 优先脚下同格（静态采矿 container），其次相邻 link（source link，喂瞬移网）。
-        const here = creep.pos.lookFor(LOOK_STRUCTURES);
-        let sink = here.find(
-          (s) => (s.structureType === STRUCTURE_CONTAINER || s.structureType === STRUCTURE_LINK) &&
-            s.store.getFreeCapacity(RESOURCE_ENERGY) > 0);
-        // 脚下没空位 sink → 找相邻(range 1) link（source link 常放在开采格旁，灌它进瞬移网）
-        if (!sink) {
-          const near = creep.pos.findInRange(FIND_MY_STRUCTURES, 1, {
-            filter: (s) => s.structureType === STRUCTURE_LINK && s.store.getFreeCapacity(RESOURCE_ENERGY) > 0,
-          });
-          if (near && near.length) sink = near[0];
-        }
+      // ⭐ 静态采矿倒货（彻底修复 2026-07-01）：
+      //   旧 bug：仅 getFreeCapacity===0（100% 满仓）才倒货。但进化大脑产出的矿工常是
+      //   9W9C(450 容量)通用体，450 容量几乎填不满 → 永远不倒 → container/source link 全空、
+      //   storage 也是 0（线上实测三 container 全 0、source link 全 0 的根因）。
+      //   新逻辑：身上有货且【快溢出】（剩余空间 < 一次采量，再采就浪费）就倒。
+      //   优先级：source link > 脚下 container（link 能瞬移到 storage=高价值，container 只就地存）。
+      const harvestPerTick = Math.min(p.work * 2, source.energy || 0); // HARVEST_POWER=2
+      const free = creep.store.getFreeCapacity(RESOURCE_ENERGY);
+      const carried = creep.store[RESOURCE_ENERGY] || 0;
+      const shouldOffload = carried > 0 && free <= harvestPerTick; // 快溢出或已满
+      if (p.work > 0 && p.carry > 0 && shouldOffload) {
+        const sink = module.exports._harvestSink(creep);
         if (sink) { utils.work(creep, 'transfer', sink, RESOURCE_ENERGY); return; }
-        // 脚下没 sink → 就地 drop（让 hauler 来捡），也好过卡死不动
-        creep.drop(RESOURCE_ENERGY);
-        return;
+        // 无可用 sink 且已 100% 满 → 就地 drop（让 hauler 捡），好过卡死不采
+        if (free === 0) { creep.drop(RESOURCE_ENERGY); return; }
+        // 未满且无 sink：不倒，继续采（落地走静态 container 溢出机制）
       }
       if (utils.work(creep, 'harvest', source) === ERR_NOT_IN_RANGE) utils.moveTo(creep, source, '#ffaa00');
     },
