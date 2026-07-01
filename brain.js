@@ -31,24 +31,30 @@ module.exports = {
   think(room) {
     if (!Memory.brain) Memory.brain = {};
     const b = Memory.brain;
+    // ⭐ 多房修复(2026-07-02): weights/nextThink/_lastE/_eRate 原是 Memory.brain 单槽,
+    //   却被每个房 per-room 读写 → 双房时先算的房把缓存留给后算的房(Game.time<nextThink 直接
+    //   返回别房权重), 能量趋势也互相污染 → 两房战略串味。改为按房名索引的 per-room 子状态
+    //   b.rooms[name].{weights,nextThink,_lastE,_eRate,_diag}。genome/playbook/cpu 仍全局(共享策略)。
+    if (!b.rooms) b.rooms = {};
+    const rs = b.rooms[room.name] || (b.rooms[room.name] = {});
     // 即使用缓存权重，也每 tick 记一次能量样本，供趋势预测（极低开销）
-    this._sampleEnergy(room, b);
-    if (b.weights && b.nextThink && Game.time < b.nextThink) {
-      return b.weights;
+    this._sampleEnergy(room, rs);
+    if (rs.weights && rs.nextThink && Game.time < rs.nextThink) {
+      return rs.weights;
     }
-    b.weights = this._compute(room, b);
-    b.nextThink = Game.time + STRATEGY_INTERVAL;
-    return b.weights;
+    rs.weights = this._compute(room, b, rs);
+    rs.nextThink = Game.time + STRATEGY_INTERVAL;
+    return rs.weights;
   },
 
-  /** 每 tick 记录能量，用于趋势预测（指数滑动平均的净流入速率） */
-  _sampleEnergy(room, b) {
+  /** 每 tick 记录能量，用于趋势预测（指数滑动平均的净流入速率）。rs=per-room 子状态。 */
+  _sampleEnergy(room, rs) {
     const cur = room.energyAvailable;
-    if (b._lastE === undefined) { b._lastE = cur; b._eRate = 0; return; }
-    const delta = cur - b._lastE;
+    if (rs._lastE === undefined) { rs._lastE = cur; rs._eRate = 0; return; }
+    const delta = cur - rs._lastE;
     // EMA 平滑净流入速率（alpha=0.3）
-    b._eRate = (b._eRate || 0) * 0.7 + delta * 0.3;
-    b._lastE = cur;
+    rs._eRate = (rs._eRate || 0) * 0.7 + delta * 0.3;
+    rs._lastE = cur;
   },
 
   /** 读进化基因（缺失用默认）。让 brain 的战略斜率真正由进化决定，而非写死。 */
@@ -57,7 +63,8 @@ module.exports = {
     return { harvestBase: 1.4, haulBase: 1.2, upgradeGain: 1.5, buildUrgency: 1.4, fillStarve: 1.5 };
   },
 
-  _compute(room, b) {
+  _compute(room, b, rs) {
+    rs = rs || b; // 向后兼容: 若未传 per-room 子状态则退回全局(单房旧行为)
     const ctrl = room.controller;
     const rcl = ctrl ? ctrl.level : 1;
     const cap = room.energyCapacityAvailable;
@@ -154,7 +161,7 @@ module.exports = {
 
     // ============ 前瞻 4：能量趋势预测（会不会饿死）============
     // 用净流入速率预测：若速率为负且当前不满，提前抬 fill/harvest 而非等空了才救
-    const eRate = b._eRate || 0;
+    const eRate = rs._eRate || 0;
     if (eRate < -0.5 && energyFill < 0.8) {
       const starve = ramp(-eRate, 0, 10) * (1 - energyFill); // 流出越快+越空 → 越紧急
       w.fill += starve * G.fillStarve;
@@ -167,7 +174,8 @@ module.exports = {
     w.repair = rcl >= 3 ? 1.0 : 0.6;
 
     // 记录诊断（供你在控制台看大脑"在想什么"）
-    b._diag = {
+    // ⭐ 多房: 写进 per-room 子槽 rs._diag, 同时镜像到 b._diag(向后兼容旧探针)。
+    b._diag = rs._diag = {
       t: Game.time, rcl, nSites, remainWork, room: room.name,
       eRate: Math.round(eRate * 10) / 10,
       hostiles: hostiles.length, downgradeBoost: Math.round(downgradeBoost * 100) / 100,
@@ -187,7 +195,7 @@ module.exports = {
 
     // ============ L5 自适应反馈：主目标乏力时疏通经济命脉 ============
     // adaptive 检测到如“冲级却进度不涨”→ 多半是采集/运输链断，提升 harvest/haul 疏通
-    const stale = adaptive.stalenessBoost(b);
+    const stale = adaptive.stalenessBoost(b, room.name);
     if (stale > 0) {
       w.harvest += stale * 0.8;
       w.haul += stale * 0.8;

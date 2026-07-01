@@ -36,6 +36,9 @@ try { linkControl = require('link.control'); } catch (e) { linkControl = null; }
 // —— 经济变现层（RCL6+ terminal 就位后自动卖矿/余量能量换 credits；无 terminal 休眠）——
 let econMarket;
 try { econMarket = require('econ.market'); } catch (e) { econMarket = null; }
+// —— 多房联动层(2026-07-02)：跨房防御互助 + 能量支援（全局跑一次，只在真需要时动作）——
+let colonyLink;
+try { colonyLink = require('colony.link'); } catch (e) { colonyLink = null; }
 
 // —— Memory 自净：清理调试残留的 __xxx 顶层临时键 ——
 // 控制台调试/autopilot 会往 Memory 写一次性 __probe/__diag/__autopilot 等 scratch 键，
@@ -59,6 +62,19 @@ module.exports.loop = function () {
   }
   // Memory 自净（每 100 tick，低频低耗）
   if (Game.time % 100 === 0) { try { _pruneScratch(); } catch (e) { /* 自净失败不影响主逻辑 */ } }
+
+  // ⭐ 多房(2026-07-02): 选“主房”作为共享基因组的唯一评估者。
+  //   genome 是一份全局基因(全房共用的战略旋钮)，但适应度=真实 progress/tick。
+  //   若让每个房都驱动 evolve，两房 baselineProg 互相覆盖、且新殖民地(RCL低/bootstrap)的
+  //   progress 是噪声，会污染基因评估。故只用最成熟的房(RCL 最高，tiebreak: 有 storage>progress)
+  //   评估共享基因——它才真正跑满整套战略。其它房照常 think/执行，只是不参与进化打分。
+  let primaryRoom = null, primaryScore = -1;
+  for (const rn in Game.rooms) {
+    const r = Game.rooms[rn];
+    if (!r.controller || !r.controller.my) continue;
+    const score = r.controller.level * 1e7 + (r.storage ? 5e6 : 0) + (r.controller.progress || 0);
+    if (score > primaryScore) { primaryScore = score; primaryRoom = rn; }
+  }
 
   for (const roomName in Game.rooms) {
     const room = Game.rooms[roomName];
@@ -98,7 +114,10 @@ module.exports.loop = function () {
     // 8. 进化：用真实 progress 增速评估基因组，变异保优淘劣（真自学习，不可自欺）
     if (!Memory.brain) Memory.brain = {};
     genome.current(Memory.brain); // 确保基因组已初始化
-    genome.evolve(room, Memory.brain, 300);
+    // ⭐ 只让主房驱动共享基因组的进化(见上方 primaryRoom 说明)，避免双房污染适应度信号。
+    if (roomName === primaryRoom) {
+      genome.evolve(room, Memory.brain, 300);
+    }
 
     // 轻量观测（每 10 tick 打一次大脑状态 + 当前计划）
     if (Game.time % 10 === 0) {
@@ -108,6 +127,10 @@ module.exports.loop = function () {
       console.log(`🧠 ${roomName} RCL${room.controller.level} creeps=${myCreeps.length} 计划=[${d.goal || '?'}:${d.plan || ''}] 进化代=${gn.gen || 0} fit=${gn.lastFitness != null ? gn.lastFitness : '?'} 缺口=[${gapStr}]`);
     }
   }
+
+  // ⭐ 多房联动层(2026-07-02)：全局跑一次（在 per-room 循环外）。跨房防御互助 + 能量支援。
+  // 只在真实需要时动作（受援房告急 + 捐助房富余），平时零副作用。单房时自动空转。
+  if (colonyLink) { try { colonyLink.run(); } catch (e) { console.log('colonyLink err ' + e); } }
 
   // ===== CPU 实测（写入 Memory 供外部读回）=====
   if (typeof Game !== 'undefined' && Game.cpu && Game.cpu.getUsed) {

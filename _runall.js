@@ -1,5 +1,5 @@
 const { execFileSync } = require('child_process');
-const tests = ['_smoketest.js','_stucktest.js','_bootstraptest.js','_recycletest.js','_braintest.js','_braintest_evo.js','_braintest_goap.js','_braintest_load.js','_braintest_run.js','_braintest_sim.js','_braintest_world.js','_brain_v2_test.js','_scrubtest.js','_towertest.js','_backlogtest.js','_spawn_falltest.js','_remotetest.js'];
+const tests = ['_smoketest.js','_stucktest.js','_bootstraptest.js','_recycletest.js','_braintest.js','_braintest_evo.js','_braintest_goap.js','_braintest_load.js','_braintest_run.js','_braintest_sim.js','_braintest_world.js','_brain_v2_test.js','_scrubtest.js','_towertest.js','_backlogtest.js','_spawn_falltest.js','_remotetest.js','_colonylinktest.js'];
 let pass=0, fail=0; const fails=[];
 for(const t of tests){
   try{

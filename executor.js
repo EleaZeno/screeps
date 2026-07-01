@@ -14,6 +14,12 @@ const utils = require('utils');
 
 module.exports = {
   run(creep) {
+    // ⭐ 扩张 creep(memory.expand)优先走殖民 handler，不走市场任务流。
+    if (creep.memory.expand) { this._expand(creep, utils); return; }
+    // ⭐ 跨房援军 creep(memory.guard 标记)优先走援防 handler（走到求援房打敌人）。
+    if (creep.memory.guard) { this._guard(creep, utils); return; }
+    // ⭐ 跨房能量支援 creep(memory.share 标记)：从捐助房 storage 取能量→送到受援房。
+    if (creep.memory.share) { this._share(creep, utils); return; }
     // ⭐ 外矿 creep 优先走跨房 handler（memory.remote 标记），不走市场任务流。
     if (creep.memory.remote) { this._remote(creep, utils); return; }
     const type = creep.memory.taskType;
@@ -33,6 +39,86 @@ module.exports = {
       fn(creep, target, utils);
     } else {
       this._idle(creep, utils);
+    }
+  },
+
+  /** 殖民扩张执行：claim(去 target 房占控制器) / pioneer(在 target 房自采+建 spawn 等)。
+   *  retreat 标记(target 房有敌)时一律撤回 eHome 避难。 */
+  _expand(creep, utils) {
+    const home = creep.memory.eHome;
+    const targetRoom = creep.memory.eTarget;
+
+    // —— 撤退：target 有敌 → 跑回 home 房 ——
+    if (creep.memory.retreat) {
+      if (creep.room.name !== home) {
+        const dir = Game.map.findExit(creep.room.name, home);
+        if (dir >= 0) { const exit = creep.pos.findClosestByRange(dir); if (exit) utils.moveTo(creep, exit, '#ff0000'); }
+      }
+      return;
+    }
+
+    if (creep.memory.eTask === 'claim') { this._eclaim(creep, home, targetRoom, utils); return; }
+    this._epioneer(creep, home, targetRoom, utils);
+  },
+
+  /** claimer：走到 target 房，claimController 占领。占领后原地待命（会自然死，或撤离）。 */
+  _eclaim(creep, home, targetRoom, utils) {
+    if (creep.room.name !== targetRoom) {
+      const dir = Game.map.findExit(creep.room.name, targetRoom);
+      if (dir >= 0) { const exit = creep.pos.findClosestByRange(dir); if (exit) utils.moveTo(creep, exit, '#ffff00'); }
+      return;
+    }
+    const ctrl = creep.room.controller;
+    if (!ctrl) return;
+    if (ctrl.my) return; // 已占，任务完成，待命
+    const r = creep.claimController(ctrl);
+    if (r === ERR_NOT_IN_RANGE) { utils.moveTo(creep, ctrl, '#ffff00'); }
+    else if (r === OK) { console.log('🚩 [EXPAND] ' + targetRoom + ' 控制器已占领！'); }
+    else if (r === ERR_GCL_NOT_ENOUGH) { console.log('❌ [EXPAND] GCL 不足，无法占领 ' + targetRoom); }
+    else if (r === ERR_INVALID_TARGET) {
+      // 控制器被别人预定/占了 → 先 attackController 掉预定
+      if (creep.attackController(ctrl) === ERR_NOT_IN_RANGE) utils.moveTo(creep, ctrl, '#ffff00');
+    }
+  },
+
+  /** pioneer：在 target 房，无货则自采本地 source；有货则建工地(优先 spawn)>没工地则升级控制器。 */
+  _epioneer(creep, home, targetRoom, utils) {
+    // 先走到 target 房
+    if (creep.room.name !== targetRoom) {
+      const dir = Game.map.findExit(creep.room.name, targetRoom);
+      if (dir >= 0) { const exit = creep.pos.findClosestByRange(dir); if (exit) utils.moveTo(creep, exit, '#00ffff'); }
+      return;
+    }
+    const empty = creep.store[RESOURCE_ENERGY] === 0;
+    const full = creep.store.getFreeCapacity(RESOURCE_ENERGY) === 0;
+    if (creep.memory.eState === 'work' && empty) creep.memory.eState = 'load';
+    if (full) creep.memory.eState = 'work';
+    if (!creep.memory.eState) creep.memory.eState = 'load';
+
+    if (creep.memory.eState === 'load') {
+      // 优先地上掉落/container，其次自采 source
+      const drop = creep.pos.findClosestByPath(FIND_DROPPED_RESOURCES, { filter: (d) => d.resourceType === RESOURCE_ENERGY && d.amount > 30 });
+      if (drop) { if (creep.pickup(drop) === ERR_NOT_IN_RANGE) utils.moveTo(creep, drop, '#00ffff'); return; }
+      const cont = creep.pos.findClosestByPath(FIND_STRUCTURES, { filter: (s) => (s.structureType === STRUCTURE_CONTAINER || s.structureType === STRUCTURE_STORAGE) && s.store[RESOURCE_ENERGY] > 50 });
+      if (cont) { if (utils.work(creep, 'withdraw', cont, RESOURCE_ENERGY) === ERR_NOT_IN_RANGE) utils.moveTo(creep, cont, '#00ffff'); return; }
+      const src = creep.memory.eSource ? Game.getObjectById(creep.memory.eSource) : null;
+      const source = (src && src.energy > 0) ? src : creep.pos.findClosestByPath(FIND_SOURCES_ACTIVE) || creep.room.find(FIND_SOURCES)[0];
+      if (!source) return;
+      creep.memory.eSource = source.id;
+      if (utils.work(creep, 'harvest', source) === ERR_NOT_IN_RANGE) utils.moveTo(creep, source, '#00ffff');
+      return;
+    }
+
+    // work：优先建 spawn 工地 > 其它工地 > 升级控制器（保不掉级）
+    const spawnSite = creep.room.find(FIND_MY_CONSTRUCTION_SITES, { filter: (s) => s.structureType === STRUCTURE_SPAWN })[0];
+    const site = spawnSite || creep.pos.findClosestByPath(FIND_MY_CONSTRUCTION_SITES);
+    if (site) {
+      if (utils.work(creep, 'build', site) === ERR_NOT_IN_RANGE) utils.moveTo(creep, site, '#00ffff');
+      return;
+    }
+    const ctrl = creep.room.controller;
+    if (ctrl && ctrl.my) {
+      if (utils.work(creep, 'upgradeController', ctrl) === ERR_NOT_IN_RANGE) utils.moveTo(creep, ctrl, '#00ffff');
     }
   },
 
@@ -121,6 +207,84 @@ module.exports = {
     const verb = (dst.structureType === STRUCTURE_CONTROLLER) ? 'upgradeController' : 'transfer';
     const r = verb === 'transfer' ? utils.work(creep, 'transfer', dst, RESOURCE_ENERGY) : utils.work(creep, 'upgradeController', dst);
     if (r === ERR_NOT_IN_RANGE) utils.moveTo(creep, dst, '#ffffff');
+  },
+
+  /** ⭐ 跨房援军执行(2026-07-02 两房联动): 走到求援房 gTarget 打敌人，敌人清光后回 home 待命。
+   *  由 colony.link 负责判定“哪个房告急、哪个健康房派兵”并标记 memory.guard/gTarget/gHome。 */
+  _guard(creep, utils) {
+    const home = creep.memory.gHome;
+    const targetRoom = creep.memory.gTarget;
+    // 援防房已解除威胁(colony.link 清空 gTarget) → 回 home 待命，自然 TTL 死掉或下次再征用。
+    if (!targetRoom) {
+      if (home && creep.room.name !== home) {
+        const dir = Game.map.findExit(creep.room.name, home);
+        if (dir >= 0) { const exit = creep.pos.findClosestByRange(dir); if (exit) utils.moveTo(creep, exit, '#00ff88'); }
+      }
+      return;
+    }
+    // 不在援防房 → 走过去(原生 moveTo 跨房)。
+    if (creep.room.name !== targetRoom) {
+      const dir = Game.map.findExit(creep.room.name, targetRoom);
+      if (dir >= 0) { const exit = creep.pos.findClosestByRange(dir); if (exit) utils.moveTo(creep, exit, '#ff0000'); }
+      return;
+    }
+    // 在援防房: 打最近的有攻击部件敌人(优先)，否则打任意敌人；无敌人则靠 spawn/controller 待命。
+    const threats = creep.room.find(FIND_HOSTILE_CREEPS, {
+      filter: (h) => h.getActiveBodyparts && (h.getActiveBodyparts(ATTACK) + h.getActiveBodyparts(RANGED_ATTACK)) > 0,
+    });
+    const anyHostile = threats.length ? threats : creep.room.find(FIND_HOSTILE_CREEPS);
+    if (anyHostile.length) {
+      const enemy = creep.pos.findClosestByRange(anyHostile);
+      this._handlers.defend(creep, enemy, utils);
+      return;
+    }
+    // 无敌人: 靠近受保护目标待命(spawn > controller)，不瞎跑。
+    const rally = creep.room.find(FIND_MY_SPAWNS)[0] || creep.room.controller;
+    if (rally && !creep.pos.inRangeTo(rally, 3)) utils.moveTo(creep, rally, '#00ff88');
+  },
+
+  /** ⭐ 跨房能量支援执行(2026-07-02): 在捐助房 sHome 从 storage 装能量 → 运到受援房 sTarget 卸给 spawn/ext。 */
+  _share(creep, utils) {
+    const home = creep.memory.sHome;      // 捐助房(有 storage 富余)
+    const targetRoom = creep.memory.sTarget; // 受援房(能量告急)
+    const empty = creep.store[RESOURCE_ENERGY] === 0;
+    const loaded = creep.store.getFreeCapacity(RESOURCE_ENERGY) === 0;
+    if (creep.memory.sState === 'deliver' && empty) creep.memory.sState = 'load';
+    if (loaded) creep.memory.sState = 'deliver';
+    if (!creep.memory.sState) creep.memory.sState = 'load';
+
+    if (creep.memory.sState === 'load') {
+      // 回捐助房从 storage 取能量(退而求其次: container)
+      if (creep.room.name !== home) {
+        const dir = Game.map.findExit(creep.room.name, home);
+        if (dir >= 0) { const exit = creep.pos.findClosestByRange(dir); if (exit) utils.moveTo(creep, exit, '#66ccff'); }
+        return;
+      }
+      const src = (Game.rooms[home] && Game.rooms[home].storage && Game.rooms[home].storage.store[RESOURCE_ENERGY] > 0)
+        ? Game.rooms[home].storage
+        : creep.pos.findClosestByPath(FIND_STRUCTURES, { filter: (s) => s.structureType === STRUCTURE_CONTAINER && s.store[RESOURCE_ENERGY] > 0 });
+      if (src) { if (utils.work(creep, 'withdraw', src, RESOURCE_ENERGY) === ERR_NOT_IN_RANGE) utils.moveTo(creep, src, '#66ccff'); }
+      return;
+    }
+
+    // deliver: 去受援房卸给 spawn/ext(缺能) → 否则 storage/container → 否则升级兽底
+    if (creep.room.name !== targetRoom) {
+      const dir = Game.map.findExit(creep.room.name, targetRoom);
+      if (dir >= 0) { const exit = creep.pos.findClosestByRange(dir); if (exit) utils.moveTo(creep, exit, '#66ff66'); }
+      return;
+    }
+    const drop = utils.findEnergyDropOff ? utils.findEnergyDropOff(creep) : null;
+    let dst = drop;
+    if (!dst) {
+      dst = creep.pos.findClosestByPath(FIND_MY_STRUCTURES, {
+        filter: (s) => (s.structureType === STRUCTURE_SPAWN || s.structureType === STRUCTURE_EXTENSION) && s.store.getFreeCapacity(RESOURCE_ENERGY) > 0,
+      });
+    }
+    if (!dst) dst = (creep.room.storage) || creep.room.controller;
+    if (!dst) return;
+    const verb = (dst.structureType === STRUCTURE_CONTROLLER) ? 'upgradeController' : 'transfer';
+    const r = verb === 'transfer' ? utils.work(creep, 'transfer', dst, RESOURCE_ENERGY) : utils.work(creep, 'upgradeController', dst);
+    if (r === ERR_NOT_IN_RANGE) utils.moveTo(creep, dst, '#66ff66');
   },
 
   /**

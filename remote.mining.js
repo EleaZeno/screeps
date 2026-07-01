@@ -22,8 +22,8 @@
  */
 
 const DEFAULT_ROUTES = [
-  // E9N54（你的第二房，正东相邻 E8N54）→ 外矿 E8N54（无主, 2 source, 0 塔, 现成 ~3500 能量）
-  { home: 'E9N54', target: 'E8N54', maxHarvest: 2, maxHaul: 3 },
+  // （历史）E9N54 → E8N54 曾为外矿。但 E8N54 已于 2026-06 claim 为自己的殖民地，
+  //   不再是无主外矿。默认不配任何外矿路线（若将来发现新的无主邻房再手动加）。
 ];
 
 // home 房经济门槛：低于这些不派外矿（避免拖垮本房发育）
@@ -45,7 +45,18 @@ module.exports = {
     const routes = (Memory.remote && Memory.remote.routes) || DEFAULT_ROUTES;
     if (!Memory.remote.routes) Memory.remote.routes = routes;
 
+    // ⭐ 多房残留自清(2026-07-02): 剔除 target 已成为自己房的死路线，避免反复派矿工去抢自己房。
+    const liveRoutes = [];
     for (const route of routes) {
+      const tgt = Game.rooms[route.target];
+      if (tgt && tgt.controller && tgt.controller.my) {
+        route._retired = 'target_now_owned';
+        continue; // 跳过：不再为已拥有的 target 派外矿队
+      }
+      liveRoutes.push(route);
+    }
+
+    for (const route of liveRoutes) {
       try { this._runRoute(route); } catch (e) { console.log('remote route err ' + route.home + '->' + route.target + ': ' + e); }
     }
 
@@ -66,6 +77,15 @@ module.exports = {
   _runRoute(route) {
     const home = Game.rooms[route.home];
     if (!home || !home.controller || !home.controller.my) return; // home 不在视野/不是我的
+
+    // ⭐ 多房残留修复(2026-07-02): target 房若已成为我自己的殖民地(claim 后)，
+    //   就不再是“无主外矿”——再派外矿队会去抢它自己的 source、与本地矿工冲突。
+    //   自动跳过并标记作废(待 run() 清理配置)。这修用户指出的“两房联动”残留隐患。
+    const tgtRoom = Game.rooms[route.target];
+    if (tgtRoom && tgtRoom.controller && tgtRoom.controller.my) {
+      route._retired = 'target_now_owned';
+      return;
+    }
 
     // —— 经济门控：本房没发育起来不外扩 ——
     const homeCreeps = home.find(FIND_MY_CREEPS);

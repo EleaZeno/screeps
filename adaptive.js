@@ -1,4 +1,4 @@
-'use strict';
+﻿'use strict';
 
 /*
  * adaptive.js — L5 自适应学习层（大脑的"经验沉淀，越用越聪明"）
@@ -30,8 +30,12 @@ module.exports = {
   observe(room, brainMem) {
     if (!brainMem) return;
     if (!brainMem.playbook) brainMem.playbook = {};
+    // ⭐ 多房修复(2026-07-02): learn.lastProg/lastEvalT/staleness 原是单槽,
+    //   双房时两房 progress 交错写同一槽 → gain 算成两房差值(垃圾)、staleness 误报。
+    //   改为按房名索引 learn.rooms[name]。playbook 仍全局(跨房共享目标收益经验)。
     if (!brainMem.learn) brainMem.learn = {};
-    const L = brainMem.learn;
+    if (!brainMem.learn.rooms) brainMem.learn.rooms = {};
+    const L = brainMem.learn.rooms[room.name] || (brainMem.learn.rooms[room.name] = {});
     const ctrl = room.controller;
     const prog = ctrl ? (ctrl.level * 1e6 + (ctrl.progress || 0)) : 0; // 单调累计进度
 
@@ -70,10 +74,18 @@ module.exports = {
    * brain 可据此临时加强采集/搬运（疏通经济命脉）。
    * @return {number} stalenessBoost 0..1（越大越该疏通经济）
    */
-  stalenessBoost(brainMem) {
+  stalenessBoost(brainMem, roomName) {
     if (!brainMem || !brainMem.learn) return 0;
-    const s = brainMem.learn.staleness || 0;
-    return s > 2 ? Math.min(1, (s - 2) / 5) : 0; // 连续乏力>2次才介入，平滑
+    // ⭐ 多房: staleness 现按房名存于 learn.rooms[name]。传入 roomName 取该房的乏力度。
+    //   向后兼容: 未传 roomName 且旧结构残留 learn.staleness 时仍可读。
+    let s = 0;
+    if (roomName && brainMem.learn.rooms && brainMem.learn.rooms[roomName]) {
+      s = brainMem.learn.rooms[roomName].staleness || 0;
+    } else {
+      s = brainMem.learn.staleness || 0;
+    }
+    if (s <= 2) return 0;
+    return Math.min(3.0, (s - 2) / 5); // 不封顶1.0:卡越久越用力疏通(上限3.0),修复预警饱和 // 连续乏力>2次才介入，平滑
   },
 };
 

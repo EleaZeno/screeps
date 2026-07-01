@@ -16,6 +16,7 @@ function ok(c, m) { if (c) { console.log('  PASS ' + m); pass++; } else { consol
 function mkRoom(o) {
   const sites = (o.sites || []).map(s => ({ progress: s.p, progressTotal: s.t }));
   return {
+    name: o.name || 'E9N54',
     controller: { level: o.rcl || 2, progress: o.prog || 0, ticksToDowngrade: o.ttd, my: true },
     energyAvailable: o.cur != null ? o.cur : 300,
     energyCapacityAvailable: o.cap != null ? o.cap : 550,
@@ -58,8 +59,8 @@ let rr = mkRoom({ rcl: 2, prog: 5000, creeps: 10 });
 adaptive.observe(rr, bm); // 首次建基线
 // 多轮评估，progress 不涨（卡住）
 for (let i = 0; i < 6; i++) { Game.time += 30; adaptive.observe(mkRoom({ rcl: 2, prog: 5000, creeps: 10 }), bm); }
-const boost = adaptive.stalenessBoost(bm);
-ok(bm.learn.staleness >= 3, `冲级progress不涨 → staleness累积 (实际=${bm.learn.staleness})`);
+const boost = adaptive.stalenessBoost(bm, 'E9N54');
+ok((bm.learn.rooms.E9N54.staleness || 0) >= 3, `冲级progress不涨 → staleness累积 (实际=${bm.learn.rooms.E9N54.staleness})`);
 ok(boost > 0, `乏力 → stalenessBoost触发疏通经济 (实际=${Math.round(boost * 100) / 100})`);
 ok(bm.playbook && bm.playbook.rcl_push, 'playbook记录了rcl_push目标的历史收益');
 
@@ -67,7 +68,7 @@ ok(bm.playbook && bm.playbook.rcl_push, 'playbook记录了rcl_push目标的历�
 const bm2 = { plan: { goalId: 'rcl_push' }, learn: {} };
 Game.time = 5000; adaptive.observe(mkRoom({ rcl: 2, prog: 0, creeps: 10 }), bm2);
 for (let i = 0; i < 4; i++) { Game.time += 30; adaptive.observe(mkRoom({ rcl: 2, prog: 1000 * (i + 1), creeps: 10 }), bm2); }
-ok((bm2.learn.staleness || 0) === 0, '进度正常涨 → 不触发乏力');
+ok(((bm2.learn.rooms.E9N54 && bm2.learn.rooms.E9N54.staleness) || 0) === 0, '进度正常涨 → 不触发乏力');
 ok(bm2.playbook.rcl_push.avgGain > 0, 'playbook记录正收益（学到“冲级有效”）');
 
 console.log('\n========================================');
