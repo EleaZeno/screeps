@@ -168,7 +168,7 @@ module.exports = {
 
     // 记录诊断（供你在控制台看大脑"在想什么"）
     b._diag = {
-      t: Game.time, rcl, nSites, remainWork,
+      t: Game.time, rcl, nSites, remainWork, room: room.name,
       eRate: Math.round(eRate * 10) / 10,
       hostiles: hostiles.length, downgradeBoost: Math.round(downgradeBoost * 100) / 100,
     };
@@ -212,6 +212,12 @@ module.exports = {
       if (!hasKeystone) w.build = Math.min(w.build, harvestFloor * spendCap);
       b._diag.spendCap = Math.round(spendCap * 100) / 100;
     }
+
+    // 多房观测修复（2026-07-01）：_diag 是单个共享槽，多房时会被最后处理的房覆盖（
+    // 新殖民地 RCL1/survive 会掩盖主房 RCL5 健康态，造成诊断假警报）。额外再写一份按房名索
+    // 引的 _diagByRoom，不动原有 _diag（向后兼容），供外部探针逐房回读真实状态。
+    if (!b._diagByRoom) b._diagByRoom = {};
+    b._diagByRoom[room.name] = b._diag;
 
     return w;
   },
