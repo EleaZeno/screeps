@@ -45,9 +45,9 @@ const TC = require('./tower.control.js');
   check('治最缺血的', t._acts[0][1]===c2);
 }
 
-// 3. 和平期 + 能量充足 → 维修受损建筑
+// 3. 和平期 + 高于应急储备 → 维修受损建筑
 {
-  const t=tower(800);
+  const t=tower(900);
   const dmg={structureType:'extension',hits:1000,hitsMax:3000,pos:pos(24,24)}; // 33% < 70%
   const room=mkRoom({towers:[t], hostiles:[], hurt:[], structs:[dmg]});
   TC.run(room);

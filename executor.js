@@ -260,8 +260,12 @@ module.exports = {
         if (dir >= 0) { const exit = creep.pos.findClosestByRange(dir); if (exit) utils.moveTo(creep, exit, '#66ccff'); }
         return;
       }
-      const src = (Game.rooms[home] && Game.rooms[home].storage && Game.rooms[home].storage.store[RESOURCE_ENERGY] > 0)
-        ? Game.rooms[home].storage
+      // 支援不能抽穿 donor 的安全底仓；低于 20k 时停止从 storage 取货。
+      const homeRoom = Game.rooms[home];
+      const homeStorage = homeRoom && homeRoom.storage;
+      // 有 storage 的成熟 donor 必须严格保底；只有根本没有 storage 时才退回 container。
+      const src = homeStorage
+        ? ((homeStorage.store[RESOURCE_ENERGY] > 20000) ? homeStorage : null)
         : creep.pos.findClosestByPath(FIND_STRUCTURES, { filter: (s) => s.structureType === STRUCTURE_CONTAINER && s.store[RESOURCE_ENERGY] > 0 });
       if (src) { if (utils.work(creep, 'withdraw', src, RESOURCE_ENERGY) === ERR_NOT_IN_RANGE) utils.moveTo(creep, src, '#66ccff'); }
       return;
@@ -378,6 +382,18 @@ module.exports = {
       if (!module.exports._loaded(creep, utils)) { module.exports._refill(creep, utils); return; }
       if (!struct) return;
       if (utils.work(creep, 'transfer', struct, RESOURCE_ENERGY) === ERR_NOT_IN_RANGE) utils.moveTo(creep, struct, '#ffffff');
+      },
+
+    // RCL6 terminal 交易燃料：固定从本房 storage 取能，再送入 terminal。
+    terminalFuel(creep, terminal, utils) {
+      if (!terminal) return;
+      if (creep.store[RESOURCE_ENERGY] === 0) {
+        const storage = creep.room.storage;
+        if (!storage || (storage.store[RESOURCE_ENERGY] || 0) <= 0) return;
+        if (utils.work(creep, 'withdraw', storage, RESOURCE_ENERGY) === ERR_NOT_IN_RANGE) utils.moveTo(creep, storage, '#33ccff');
+        return;
+      }
+      if (utils.work(creep, 'transfer', terminal, RESOURCE_ENERGY) === ERR_NOT_IN_RANGE) utils.moveTo(creep, terminal, '#33ccff');
     },
 
     // ⭐ 屯仓（修复 2026-06-30）：装满能量送进 storage 储备。与 fill 同机制，只是目标是 storage。

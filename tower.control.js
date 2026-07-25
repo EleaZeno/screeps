@@ -19,7 +19,7 @@
  */
 
 // tower 维修时保留的能量底线（满 1000）：低于此值和平期不再维修，攒着应急开火。
-const REPAIR_ENERGY_FLOOR = 500;
+const REPAIR_ENERGY_FLOOR = 850;
 // 普通建筑维修触发阈值（低于最大血量此比例才修，避免抖动）。
 const REPAIR_RATIO = 0.7;
 // rampart/wall 维持的目标血量（早期 RCL 不堆太高，够挡一阵即可）。

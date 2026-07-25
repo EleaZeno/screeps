@@ -97,7 +97,7 @@ module.exports = {
           // 槽已坐满但源还堆积 = hauler 不足, 造 Carrier 搬走
           topType = (shortage.haul || shortage.fill) ? (shortage.haul ? 'haul' : 'fill') : 'haul';
         }
-      } else if ((topType === 'haul' || topType === 'fill') && flow.haulHave >= flow.haulNeed) {
+      } else if ((topType === 'haul' || topType === 'fill' || topType === 'store' || topType === 'terminalFuel') && flow.haulHave >= flow.haulNeed) {
         // 运力已足。haul/fill 任务的 capacity 随 container 囤量膨胀(可达 80+)，
         // 会霸占 shortage 排名第一；若此时直接 return，则真实存在的 upgrade/build 缺口
         // 永远得不到孵化 → 能量满仓溢出、spawn 空转、卡级。
@@ -159,7 +159,7 @@ module.exports = {
   _bestNonHaul(shortage) {
     let best = null, bestGap = 0;
     for (const t in shortage) {
-      if (t === 'haul' || t === 'fill') continue;
+      if (t === 'haul' || t === 'fill' || t === 'store' || t === 'terminalFuel') continue;
       if (shortage[t] > bestGap) { bestGap = shortage[t]; best = t; }
     }
     return best;
@@ -172,6 +172,8 @@ module.exports = {
         return this._minerBody(cap);
       case 'haul':
       case 'fill':
+      case 'store':
+      case 'terminalFuel':
         return this._haulerBody(cap);
       case 'defend':
         return this._defenderBody(cap);
@@ -235,7 +237,8 @@ module.exports = {
     // Miner=钉 container 静采；Carrier=专职搬运；Filler=回填 spawn/ext；
     // Upgrader=钉 controller；Builder=盖楼修路；Guard=防御。保持 ASCII 控制台安全。
     return {
-      harvest: 'Miner', haul: 'Carrier', fill: 'Filler',
+      harvest: 'Miner', haul: 'Carrier', fill: 'Filler', store: 'Storer',
+      terminalFuel: 'Terminaler',
       upgrade: 'Upgrader', build: 'Builder', repair: 'Repairer', defend: 'Guard',
     }[type] || 'Creep';
   },

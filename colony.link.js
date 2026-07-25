@@ -17,7 +17,7 @@
  *    某自有房能量告急（长期填不满 spawn、无 storage 缓冲）且有兄弟房能量富余
  *    （storage 满/source 溢出）→ 从富余房派 Carrier 把能量运过去。
  *    ⚠️ 只在接收房【真缺】+ 捐赠房【真富】时开，避免无谓跨房搬运烧 CPU/creep。
- *    默认保守：接收房需 RCL≤3 且无 storage；捐赠房需 storage>阈值 或 source 长期溢出。
+ *    默认保守：接收房必须出现客观能量危机；不再用 RCL≤3 一刀切，RCL6 新房塔空同样可求援。
  *
  * 设计原则：
  *   - 全局单次调用（main 循环外层调一次），不改 per-room 六步流水线。
@@ -32,6 +32,8 @@ const SHARE_MAX_PER_ROUTE = 2;   // 单条能量支援线最多 2 个 Carrier
 const DONOR_MIN_RCL = 4;         // 捐助房至少 RCL4（能造像样的 body 且自身发育稳）
 const DONOR_MIN_CREEPS = 6;      // 捐助房自己人口够了才外援
 const SHARE_DONOR_STORAGE_FLOOR = 20000; // 捐助房 storage 能量高于此才算"富余"可外送
+const SHARE_DONOR_RESERVE = 20000;       // 支援途中绝不把 donor storage 抽到此线以下
+const TOWER_EMERGENCY = 300;             // 任一 tower 低于此值，视为防御燃料危机
 
 module.exports = {
   /** 全局入口：main 循环外层每 tick 调一次。 */
@@ -154,13 +156,18 @@ module.exports = {
     if (!Memory.link.share) Memory.link.share = {};
     const S = Memory.link.share;
 
-    // 找"告急"的受援房：RCL≤3、无 storage、且长期填不满 spawn（能量占用率低）。
+    // 找“告急”的受援房：用客观需求而非 RCL 门槛。
+    // 低级房看 spawn/ext 填充；成熟房额外看 tower 紧急储备与 storage 缓冲。
     const needy = myRooms.filter((room) => {
-      if (room.controller.level > 3) return false;
-      if (room.storage) return false;
       const fill = room.energyAvailable / Math.max(1, room.energyCapacityAvailable);
-      // energyAvailable 长期低于 60% = spawn/ext 填不满（孵化受限）
-      return fill < 0.6;
+      const stored = room.storage ? (room.storage.store[RESOURCE_ENERGY] || 0) : 0;
+      const towers = room.find(FIND_MY_STRUCTURES, {
+        filter: (s) => s.structureType === STRUCTURE_TOWER,
+      });
+      const towerCrisis = towers.some((t) => (t.store[RESOURCE_ENERGY] || 0) < TOWER_EMERGENCY);
+      const noBuffer = !room.storage || stored < 5000;
+      // 低填充且无缓冲，或任何 tower 进入紧急低能量状态。
+      return (fill < 0.6 && noBuffer) || towerCrisis;
     });
     // 找"富余"的捐助房：RCL≥DONOR_MIN_RCL、storage 能量高于阈值。
     const donors = myRooms.filter((room) => {

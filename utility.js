@@ -52,13 +52,15 @@ module.exports = {
     switch (task.type) {
       case 'harvest': if (p.work === 0) return 0; break;
       case 'haul': if (p.carry === 0) return 0; break;
-      case 'fill': if (p.carry === 0) return 0; break;
+      case 'fill':
+      case 'store':
+      case 'terminalFuel': if (p.carry === 0) return 0; break;
       case 'upgrade': case 'build': case 'repair': if (p.work === 0 || p.carry === 0) return 0; break;
       case 'defend': return (p.attack + p.ranged) > 0 ? Math.min(1, (p.attack + p.ranged) / 4) : 0.05;
       default: return 0.5;
     }
     const tp = wm.taskThroughput(creep, task, 5);
-    const CAP = { harvest: wm.SOURCE_REGEN_RATE, haul: 12, fill: 12, upgrade: 8, build: 25, repair: 25 };
+    const CAP = { harvest: wm.SOURCE_REGEN_RATE, haul: 12, fill: 12, store: 12, terminalFuel: 12, upgrade: 8, build: 25, repair: 25 };
     const cap = CAP[task.type] || 10;
     return Math.max(0.05, Math.min(1, tp / cap));
   },
@@ -93,6 +95,8 @@ module.exports = {
       case 'haul':
         return (1 - g.haulEnerW) + (1 - fillRatio) * g.haulEnerW; // 空载去取货
       case 'fill':
+      case 'store':
+      case 'terminalFuel':
       case 'upgrade':
       case 'build':
       case 'repair':

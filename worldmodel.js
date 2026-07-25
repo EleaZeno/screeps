@@ -124,7 +124,9 @@ module.exports = {
         // 静态采矿：到位后 100% 输出，受 source 上限约束
         return Math.min(p.work * HARVEST_POWER, SOURCE_REGEN_RATE);
       case 'haul':
-      case 'fill': {
+      case 'fill':
+      case 'store':
+      case 'terminalFuel': {
         // 搬运吞吐 = 载量 / (取+送的往返时间)。距离越近吞吐越高。
         const carryCap = (p.carry || 1) * CARRY_CAPACITY;
         const roundTrip = (dist || 5) * 2 * this.ticksPerTile(creep, true);

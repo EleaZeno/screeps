@@ -46,10 +46,14 @@ module.exports = {
     const bp = roadmap.blueprint(rcl);
 
     // ---- 1. extension（核心，最优先）----
-    this.ensureCount(room, spawn.pos, 'extension', bp.extension || 0, 6);
+    // 老房核心区会逐级被道路/仓库/link/lab 占满。若永远只搜 spawn 周围 6 格，
+    // RCL6 后会出现“蓝图要 40、实际卡 33，且每 20 tick 永久重试失败”的静默死锁。
+    // 先用紧凑核心区；不足时由 ensureCount 自动扩大到整个安全腹地继续找位。
+    this.ensureCount(room, spawn.pos, 'extension', bp.extension || 0, 6, 20);
 
     // ---- 2. tower（防御）----
-    if (bp.tower) this.ensureCount(room, spawn.pos, 'tower', bp.tower, 4);
+    // tower 同理：第 2 塔解锁较晚，4 格核心区往往已无空位，允许回退到 12 格。
+    if (bp.tower) this.ensureCount(room, spawn.pos, 'tower', bp.tower, 4, 12);
 
     // ---- 3. container（source 旁 + controller 旁）----
     if (rcl >= 2) this.planContainers(room);
@@ -76,7 +80,7 @@ module.exports = {
     if (bp.extractor) this.planExtractor(room);
 
     // ---- 8. lab（RCL6+，成簇放）----
-    if (bp.lab) this.ensureCount(room, spawn.pos, 'lab', bp.lab, 7);
+    if (bp.lab) this.ensureCount(room, spawn.pos, 'lab', bp.lab, 7, 14);
 
     // ---- 9. factory（RCL7+，单点）----
     if (bp.factory) this.ensureSingle(room, spawn.pos, 'factory', 4);
@@ -91,11 +95,17 @@ module.exports = {
   },
 
   /** 确保某类建筑达到 target 数量（已建+在建），不足则围绕 center 补建 */
-  ensureCount(room, center, key, target, maxRange) {
+  ensureCount(room, center, key, target, maxRange, fallbackRange) {
     const type = TYPE[key];
     if (!type) return;
     const have = this.countStructAndSites(room, type);
-    if (have < target) this.placeAround(room, center, type, target - have, maxRange);
+    if (have >= target) return;
+    this.placeAround(room, center, type, target - have, maxRange);
+    // 核心区摆不下时扩大搜索范围。重新计数，避免重复/超建；仍保持同一棋盘式布局规则。
+    const afterCompact = this.countStructAndSites(room, type);
+    if (afterCompact < target && fallbackRange && fallbackRange > maxRange) {
+      this.placeAround(room, center, type, target - afterCompact, fallbackRange);
+    }
   },
 
   /** 单点建筑：只建 1 个（已有就跳过）*/
@@ -188,9 +198,10 @@ module.exports = {
     }
   },
 
-  /** link（RCL5+）：按优先级排——controller link（喂 upgrader，收益最高）> storage link（兑底）> source link。
+  /** link（RCL5+）：先保证一发一收，再补 storage receiver。
    *  关键：source link 必须放在矿工开采格相邻(range1)格上，否则矿工灌不进去=死 link。
-   *  link.control 需 ≥2 个 link 才能瞬移，所以优先保证 controller+storage 这对接收方先到位。 */
+   *  RCL5 只有2个配额，必须是 controller receiver + source sender；
+   *  controller+storage 都是接收方，会导致整级 link 投资闲置。 */
   planLinks(room, target) {
     const have = this.countStructAndSites(room, STRUCTURE_LINK);
     if (have >= target) return;
@@ -204,15 +215,7 @@ module.exports = {
         if (this.countStructAndSites(room, STRUCTURE_LINK) > before) placed++;
       } else { /* 已有 */ }
     }
-    // 优先级 2: storage link（兑底接收方，hauler 短驳）
-    if (placed < target && room.storage) {
-      if (this._noLinkNear(room, room.storage.pos)) {
-        const before = this.countStructAndSites(room, STRUCTURE_LINK);
-        this.placeAround(room, room.storage.pos, STRUCTURE_LINK, 1, 2);
-        if (this.countStructAndSites(room, STRUCTURE_LINK) > before) placed++;
-      }
-    }
-    // 优先级 3: source link——只放在某开采格相邻空格（矿工能 range1 灌进去）。
+    // 优先级 2: source sender——只放在某开采格相邻空格（矿工能 range1 灌进去）。
     //   无可达空格则不放（宁缺勿滥：放了也是死 link）。
     if (placed < target) {
       const sources = room.find(FIND_SOURCES);
@@ -225,6 +228,14 @@ module.exports = {
           placed++;
           console.log('[BUILD] source link @' + spot.x + ',' + spot.y + ' (歗开采格)');
         }
+      }
+    }
+    // 优先级 3: storage receiver（RCL6 的第3个 link 起再补）。
+    if (placed < target && room.storage) {
+      if (this._noLinkNear(room, room.storage.pos)) {
+        const before = this.countStructAndSites(room, STRUCTURE_LINK);
+        this.placeAround(room, room.storage.pos, STRUCTURE_LINK, 1, 2);
+        if (this.countStructAndSites(room, STRUCTURE_LINK) > before) placed++;
       }
     }
   },

@@ -80,7 +80,10 @@ module.exports.loop = function () {
     const room = Game.rooms[roomName];
     if (!room.controller || !room.controller.my) continue;
 
-    const myCreeps = room.find(FIND_MY_CREEPS);
+    const allRoomCreeps = room.find(FIND_MY_CREEPS);
+    // 跨房/扩张/外矿 creep 由专属 handler 驱动，不参加本房任务市场。
+    // 否则它们会“占掉”本房 fill/build/haul 槽位却不执行该任务，导致 shortage 被虚假压低。
+    const myCreeps = allRoomCreeps.filter((c) => !(c.memory && (c.memory.remote || c.memory.expand || c.memory.guard || c.memory.share)));
 
     // 0a. 防御层：主动驱动 tower（攻击敌人 > 治疗友军 > 和平期维修）。
     // 放在最前：tower 反应速度直接决定房间被打时能否扛住。CPU 极低。
@@ -102,13 +105,14 @@ module.exports.loop = function () {
     // 3. 市场：谁干（写入 creep.memory.taskId/taskType/taskTarget）
     const assignment = market.assign(myCreeps, tasks, weights);
     // 4. 执行：每个 creep 干自己中标的活
-    for (const creep of myCreeps) {
+    // guard/share 由 colony.link 在全局层驱动，避免同 tick 在 per-room 和全局层执行两次。
+    for (const creep of allRoomCreeps.filter((c) => !(c.memory && (c.memory.guard || c.memory.share)))) {
       executor.run(creep);
     }
     // 5. 缺口分析
     const shortage = market.shortage(tasks, assignment);
     // 6. 孵化：最缺什么造什么
-    spawning.run(room, shortage, myCreeps.length);
+    spawning.run(room, shortage, allRoomCreeps.length);
     // 7. 自适应学习：观察结果，沉淀经验到 playbook（越用越聪明）
     adaptive.observe(room, Memory.brain);
     // 8. 进化：用真实 progress 增速评估基因组，变异保优淘劣（真自学习，不可自欺）

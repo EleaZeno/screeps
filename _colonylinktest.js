@@ -116,6 +116,20 @@ const LINK = require('./colony.link.js');
   check('storage不富余→不派能量支援', spawned===0);
 }
 
+// ---- B3. RCL6 新房 tower 空仓也应求援（旧逻辑 RCL>3 一律拒绝）----
+{
+  resetGame(100);
+  let shareBody=null;
+  const donorSpawn={ spawning:false, spawnCreep:(b)=>{ shareBody=b; return OK; } };
+  Game.rooms['E9N54']=mkRoom('E9N54',{rcl:6, cap:1300, energyAvailable:1300,
+    creeps:new Array(8).fill({body:[]}), spawns:[donorSpawn], storage:{store:{energy:50000}}});
+  const emptyTower={structureType:STRUCTURE_TOWER,store:{energy:3}};
+  Game.rooms['E8N54']=mkRoom('E8N54',{rcl:6, energyAvailable:1200, cap:1300,
+    creeps:new Array(6).fill({body:[]}), structs:[emptyTower], storage:{store:{energy:0}}});
+  LINK.run();
+  check('RCL6 tower空仓→允许跨房能量支援', shareBody!==null);
+}
+
 // ---- C. remote 退役守卫：target 已成为自有房 → 标记退役、不派外矿 ----
 {
   resetGame(100);

@@ -13,7 +13,9 @@ global.Memory = {};
 let dealCalls = [];
 global.Game = {
   time: 100, // 100 % 50 === 0，命中评估 tick
+  rooms: {},
   market: {
+    calcTransactionCost() { return 100; },
     deal(id, amount, room) { dealCalls.push({ id, amount, room }); return OK; },
     getAllOrders(filter) {
       if (filter.resourceType === 'L') return [{ id: 'o1', price: 0.5, amount: 3000 }, { id: 'o2', price: 0.8, amount: 1000 }];
@@ -39,12 +41,12 @@ ok(em.run(room({ rcl: 5 })) === false, 'RCL5 无terminal 休眠');
 dealCalls = [];
 ok(em.run(room({ rcl: 6, terminal: { cooldown: 0, store: { L: 1000 } } })) === false && dealCalls.length === 0, '矿物<阈值不卖');
 
-// 3. 有 terminal 且矿物够 → 吃最高价买单(0.8)，成交量=min(amount,5000,买单余量1000)=1000
+// 3. 有 terminal 且矿物够 → 按总净收益选单；o1 虽单价低但可成交3000，总净收益更高
 dealCalls = [];
 {
-  const acted = em.run(room({ rcl: 6, terminal: { cooldown: 0, store: { L: 6000 } } }));
+  const acted = em.run(room({ rcl: 6, terminal: { cooldown: 0, store: { L: 6000, [RESOURCE_ENERGY]: 2000 } } }));
   ok(acted === true, '矿物够→卖出');
-  ok(dealCalls.length === 1 && dealCalls[0].id === 'o2' && dealCalls[0].amount === 1000, '吃最高价买单(0.8) 量=1000');
+  ok(dealCalls.length === 1 && dealCalls[0].id === 'o1' && dealCalls[0].amount === 3000, '按总净收益选择 o1，量=3000');
 }
 
 // 4. 显式 Memory.econ.enabled=false → 强制关停

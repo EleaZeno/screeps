@@ -9,7 +9,7 @@
  *     grunt-screeps 用文件 basename 作模块名，无法自动改名，
  *     故 deploy 任务先把源文件复制进 _dist/ 并把 brain.loop.js 改名为 main.js，
  *     再从 _dist/ 上传，保证线上模块名 = main。
- *  3) 必须上传**全部 17 个线上模块**，漏传会导致线上模块被删→殖民地瘫痪。
+ *  3) 必须上传完整模块集，漏传会导致线上模块被删→殖民地瘫痪。
  *     （历史旧配置只列了 9 个，会丢 genome/worldmodel/build.planner/layout.planner 等）
  *
  * 部署后无需手动切分支（brain 已是 activeWorld）。
@@ -37,6 +37,11 @@ const MODULE_MAP = {
   'source.scheduler': 'source.scheduler.js',
   'build.planner': 'build.planner.js',
   'layout.planner': 'layout.planner.js',
+  'tower.control': 'tower.control.js',
+  'link.control': 'link.control.js',
+  'remote.mining': 'remote.mining.js',
+  'econ.market': 'econ.market.js',
+  'colony.link': 'colony.link.js',
 };
 
 module.exports = function (grunt) {
@@ -63,8 +68,8 @@ module.exports = function (grunt) {
   grunt.initConfig({
     screeps: {
       options: {
-        email: 'your-email@example.com',
-        token: 'REPLACE_WITH_YOUR_AUTH_TOKEN',
+        email: process.env.SCREEPS_EMAIL,
+        token: process.env.SCREEPS_TOKEN,
         branch: 'brain',
       },
       dist: {
@@ -74,6 +79,9 @@ module.exports = function (grunt) {
   });
 
   // 一条命令完成：准备 dist -> 上传
-  grunt.registerTask('deploy', ['prepare-dist', 'screeps']);
+  grunt.registerTask('check-auth', function () {
+    if (!process.env.SCREEPS_EMAIL || !process.env.SCREEPS_TOKEN) grunt.fail.fatal('缺少 SCREEPS_EMAIL / SCREEPS_TOKEN 环境变量');
+  });
+  grunt.registerTask('deploy', ['check-auth', 'prepare-dist', 'screeps']);
   grunt.registerTask('default', ['deploy']);
 };

@@ -44,14 +44,19 @@ module.exports = {
     if (typeof Game.market === 'undefined' || !Game.market.deal) return false;
 
     let acted = false;
-    try { if (this._sellMinerals(room, terminal, econ)) acted = true; } catch (e) { console.log('econ mineral err ' + e); }
-    if (!acted) {
-      try { if (this._sellSurplusEnergy(room, terminal, econ)) acted = true; } catch (e) { console.log('econ energy err ' + e); }
+    this._activeTerminal = terminal;
+    try {
+      try { if (this._sellMinerals(room, terminal, econ)) acted = true; } catch (e) { console.log('econ mineral err ' + e); }
+      if (!acted) {
+        try { if (this._sellSurplusEnergy(room, terminal, econ)) acted = true; } catch (e) { console.log('econ energy err ' + e); }
+      }
+      return acted;
+    } finally {
+      this._activeTerminal = null;
     }
-    return acted;
   },
 
-  /** 卖矿物：把 terminal 里攒够阈值的非能量资源，吃最高价买单。 */
+  /** 卖矿物：把 terminal 里攒够阈值的非能量资源，吃净收益最佳且燃料可负担的买单。 */
   _sellMinerals(room, terminal, econ) {
     const minSell = econ.minMineralSell || MIN_MINERAL_SELL;
     // 找 terminal 里达到阈值的矿物（排除能量）
@@ -80,17 +85,41 @@ module.exports = {
     return false;
   },
 
-  /** 吃指定资源单价最高的 buy 单，成交 amount（受买单余量限制）。返回 {amount,price} 或 null。 */
+  /** 吃“当前 terminal 能量实际付得起”的最佳 buy 单。
+   *  不再盲目按裸单价选远端订单；用少量迭代求最大可成交量，并按净收益排序。
+   *  能量估值可用 Memory.econ.energyCreditValue 调整（默认 0.05 credit/e）。 */
   _dealBest(resource, amount, roomName) {
     const orders = Game.market.getAllOrders({ type: ORDER_BUY, resourceType: resource });
     if (!orders || !orders.length) return null;
-    orders.sort((a, b) => b.price - a.price);            // 单价最高优先
-    const best = orders[0];
-    if (!best || best.amount <= 0) return null;
-    const deal = Math.min(amount, best.amount);
-    if (deal <= 0) return null;
-    const r = Game.market.deal(best.id, deal, roomName);
-    if (r === OK) return { amount: deal, price: best.price };
+    const room = Game.rooms && Game.rooms[roomName];
+    // 正常运行从 Game.rooms 取；纯 mock/回归测试可由 run() 暂存当前 terminal。
+    const terminal = (room && room.terminal) || this._activeTerminal;
+    if (!terminal) return null;
+    const fuel = terminal.store[RESOURCE_ENERGY] || 0;
+    const energyValue = (Memory.econ && Memory.econ.energyCreditValue) || 0.05;
+    const feasible = [];
+    for (const order of orders) {
+      if (!order || order.amount <= 0) continue;
+      let hi = Math.floor(Math.min(amount, order.amount));
+      if (resource === RESOURCE_ENERGY) hi = Math.min(hi, fuel); // 卖出的能量本体也必须在 terminal
+      let lo = 0;
+      // 二分最大可付交易能耗的成交量。
+      while (lo < hi) {
+        const mid = Math.ceil((lo + hi) / 2);
+        const tx = Game.market.calcTransactionCost ? Game.market.calcTransactionCost(mid, roomName, order.roomName) : 0;
+        const required = tx + (resource === RESOURCE_ENERGY ? mid : 0);
+        if (required <= fuel) lo = mid; else hi = mid - 1;
+      }
+      if (lo <= 0) continue;
+      const tx = Game.market.calcTransactionCost ? Game.market.calcTransactionCost(lo, roomName, order.roomName) : 0;
+      feasible.push({ order, amount: lo, tx, net: order.price * lo - tx * energyValue });
+    }
+    feasible.sort((a, b) => b.net - a.net);
+    for (const f of feasible) {
+      const r = Game.market.deal(f.order.id, f.amount, roomName);
+      if (r === OK) return { amount: f.amount, price: f.order.price };
+      console.log('[ECON] deal失败 code=' + r + ' res=' + resource + ' amount=' + f.amount + ' room=' + roomName);
+    }
     return null;
   },
 };

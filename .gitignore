@@ -4,6 +4,8 @@ package-lock.json
 Gruntfile.js
 
 Gruntfile.brain.js
+.env
+.env.local
 _dist/
 _apicheck.js
 _memcheck.js

@@ -31,6 +31,7 @@ module.exports = {
     this._collectHaul(room, tasks);
     this._collectFill(room, tasks);
     this._collectStore(room, tasks);
+    this._collectTerminalFuel(room, tasks);
     this._collectUpgrade(room, tasks);
     this._collectBuild(room, tasks);
     this._collectRepair(room, tasks);
@@ -195,6 +196,42 @@ module.exports = {
     });
   },
 
+  /** RCL6 terminal 交易燃料任务：terminal 内有可售资源却没有能量时，市场层永远无法成交。
+   *  这里把“补足 terminal 能量储备”表达成普通市场任务，不写死某个 creep/role。
+   *  只从 storage 有余量时补，避免抽干新殖民地；目标储备可由 Memory.econ.terminalEnergyReserve 调整。 */
+  _collectTerminalFuel(room, tasks) {
+    const terminal = room.terminal;
+    const storage = room.storage;
+    if (!terminal || !storage) return;
+    const econ = Memory.econ || {};
+    const reserve = Math.max(1000, econ.terminalEnergyReserve || 20000);
+    const current = terminal.store[RESOURCE_ENERGY] || 0;
+    if (current >= reserve) return;
+    const storageEnergy = storage.store[RESOURCE_ENERGY] || 0;
+    // 保住房间自用底仓；可由 Memory.econ.storageFuelFloor 调整。
+    const storageFloor = Math.max(0, econ.storageFuelFloor || 10000);
+    if (storageEnergy <= storageFloor) return;
+    // 只有 terminal 里真有非能量资源，或显式要求预热时才补交易燃料。
+    let hasCargo = !!econ.prefuelTerminal;
+    if (!hasCargo) {
+      for (const res in terminal.store) {
+        if (res !== RESOURCE_ENERGY && terminal.store[res] > 0) { hasCargo = true; break; }
+      }
+    }
+    if (!hasCargo) return;
+    const need = Math.min(reserve - current, storageEnergy - storageFloor);
+    if (need <= 0) return;
+    tasks.push({
+      id: `terminalFuel:${terminal.id}`,
+      type: 'terminalFuel',
+      targetId: terminal.id,
+      pos: { x: terminal.pos.x, y: terminal.pos.y, roomName: room.name },
+      baseValue: current < 1000 ? 88 : 62,
+      capacity: Math.min(2, Math.max(1, Math.ceil(need / 1000))),
+      meta: { need, reserve, sourceId: storage.id },
+    });
+  },
+
   /** 升级任务：controller 永远可升级。价值由战略层权重主导。 */
   _collectUpgrade(room, tasks) {
     const ctrl = room.controller;
@@ -267,7 +304,9 @@ module.exports = {
         targetId: site.id,
         pos: { x: site.pos.x, y: site.pos.y, roomName: room.name },
         baseValue: importance,
-        capacity: Math.max(1, Math.ceil(site.progressTotal / 5000)),
+        // 并发看“剩余工程量”而不是总造价；且单工地最多 3 人，防止 RCL6 的
+        // terminal(100k)+3 labs(50k each)虚构出 50 个 builder 槽并诱发人口爆炸。
+        capacity: Math.min(3, Math.max(1, Math.ceil((site.progressTotal - site.progress) / 20000))),
         meta: {},
       });
     }
