@@ -1,6 +1,7 @@
 'use strict';
 // 世界模型测试：验证大脑用真实物理理解"静态采矿 vs 来回跑谁高效"
 global.WORK = 'work'; global.CARRY = 'carry'; global.MOVE = 'move'; global.ATTACK = 'attack'; global.RANGED_ATTACK = 'ranged'; global.TOUGH = 'tough';
+global.Game = { time: 1000 };
 const path = require('path'); const Module = require('module'); const orig = Module._resolveFilename;
 Module._resolveFilename = function (r, ...a) { if (r === 'worldmodel') return path.join(__dirname, 'worldmodel.js'); return orig.call(this, r, ...a); };
 const wm = require('./worldmodel');

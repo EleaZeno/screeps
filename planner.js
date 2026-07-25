@@ -57,13 +57,16 @@ const GOALS = [
   {
     id: 'infra',
     desc: '基建：有工地优先盖完（extension决定身体上限）',
-    active: (c) => c.nSites > 0 && c.remainWork > 300,
+    // rapidGrowth 下只让关键基建阻塞冲级；terminal/lab/extractor/road 等可并行慢建，
+    // 不再把整个房间长期锁死在 infra，避免 RCL6→7 被 20 万级可选工程量拖住。
+    active: (c) => c.nSites > 0 && (c.rapidGrowth ? c.criticalRemain > 300 : c.remainWork > 300),
     plan: (c) => {
       // 工地多→建造发力，但保证采集/搬运供得上建造
-      const urgency = ramp(c.remainWork, 300, 4000);
+      const blockingWork = c.rapidGrowth ? c.criticalRemain : c.remainWork;
+      const urgency = ramp(blockingWork, 300, 4000);
       return {
         bias: { build: 1.5 + urgency * 0.8, haul: 1.3, harvest: 1.2, upgrade: 0.5 },
-        text: `基建冲刺(工地${c.nSites},剩${c.remainWork})`,
+        text: `基建冲刺(关键剩${blockingWork},总剩${c.remainWork})`,
       };
     },
   },
@@ -107,9 +110,23 @@ module.exports = {
   _context(room, brainMem) {
     const ctrl = room.controller;
     const sites = room.find(FIND_MY_CONSTRUCTION_SITES);
-    let remainWork = 0;
-    for (const s of sites) remainWork += (s.progressTotal - s.progress);
+    let remainWork = 0, criticalRemain = 0;
+    const criticalTypes = {};
+    [
+      (typeof STRUCTURE_SPAWN !== 'undefined' ? STRUCTURE_SPAWN : 'spawn'),
+      (typeof STRUCTURE_EXTENSION !== 'undefined' ? STRUCTURE_EXTENSION : 'extension'),
+      (typeof STRUCTURE_TOWER !== 'undefined' ? STRUCTURE_TOWER : 'tower'),
+      (typeof STRUCTURE_STORAGE !== 'undefined' ? STRUCTURE_STORAGE : 'storage'),
+      (typeof STRUCTURE_LINK !== 'undefined' ? STRUCTURE_LINK : 'link'),
+      (typeof STRUCTURE_CONTAINER !== 'undefined' ? STRUCTURE_CONTAINER : 'container'),
+    ].forEach((t) => { criticalTypes[t] = true; });
+    for (const s of sites) {
+      const left = s.progressTotal - s.progress;
+      remainWork += left;
+      if (criticalTypes[s.structureType]) criticalRemain += left;
+    }
     const storage = room.storage;
+    const strategy = Memory.strategy || {};
     return {
       rcl: ctrl ? ctrl.level : 1,
       ticksToDowngrade: ctrl ? ctrl.ticksToDowngrade : undefined,
@@ -117,13 +134,15 @@ module.exports = {
       energyFill: room.energyAvailable / Math.max(1, room.energyCapacityAvailable),
       nSites: sites.length,
       remainWork,
+      criticalRemain,
+      rapidGrowth: strategy.rapidGrowth !== false && ctrl && ctrl.level >= 6,
       stored: storage ? storage.store[RESOURCE_ENERGY] : 0,
       eRate: brainMem ? (brainMem._eRate || 0) : 0,
     };
   },
 
   _slimCtx(c) {
-    return { rcl: c.rcl, creeps: c.creepCount, eFill: Math.round(c.energyFill * 100), sites: c.nSites, remain: c.remainWork };
+    return { rcl: c.rcl, creeps: c.creepCount, eFill: Math.round(c.energyFill * 100), sites: c.nSites, remain: c.remainWork, critical: c.criticalRemain, rapid: c.rapidGrowth };
   },
 };
 

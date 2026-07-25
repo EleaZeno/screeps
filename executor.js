@@ -57,8 +57,22 @@ module.exports = {
       return;
     }
 
+    if (creep.memory.eTask === 'scout') { this._escout(creep, home, targetRoom, utils); return; }
     if (creep.memory.eTask === 'claim') { this._eclaim(creep, home, targetRoom, utils); return; }
     this._epioneer(creep, home, targetRoom, utils);
+  },
+
+  _escout(creep, home, targetRoom, utils) {
+    if (creep.room.name !== targetRoom) {
+      const dir = Game.map.findExit(creep.room.name, targetRoom);
+      if (dir >= 0) { const exit = creep.pos.findClosestByRange(dir); if (exit) utils.moveTo(creep, exit, '#aaaaaa'); }
+      return;
+    }
+    // expansion.run 会读取可见房间并刷新 Intel；Scout 到达后留到临死前，减少重复孵化。
+    if ((creep.ticksToLive || 1500) < 20 && home && creep.room.name !== home) {
+      const dir = Game.map.findExit(creep.room.name, home);
+      if (dir >= 0) { const exit = creep.pos.findClosestByRange(dir); if (exit) utils.moveTo(creep, exit, '#aaaaaa'); }
+    }
   },
 
   /** claimer：走到 target 房，claimController 占领。占领后原地待命（会自然死，或撤离）。 */

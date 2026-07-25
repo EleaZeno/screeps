@@ -73,14 +73,16 @@ module.exports = {
     // ---- 5. link（RCL5+：controller 旁 + source 旁 + storage 旁）----
     if (bp.link) this.planLinks(room, bp.link);
 
-    // ---- 6. terminal（RCL6+，单点）----
-    if (bp.terminal) this.ensureSingle(room, spawn.pos, 'terminal', 3);
-
-    // ---- 7. extractor（RCL6+，盖在 mineral 上）----
-    if (bp.extractor) this.planExtractor(room);
-
-    // ---- 8. lab（RCL6+，成簇放）----
-    if (bp.lab) this.ensureCount(room, spawn.pos, 'lab', bp.lab, 7, 14);
+    // ---- 6-8. RCL6 可选产业设施 ----
+    // 快速发展模式先完成 extension/tower/storage/link 等“产能与安全骨架”，并形成储备，
+    // 再铺 terminal/extractor/lab。已有工地不会删除，只是不继续追加，避免新房刚升 RCL6
+    // 就被 20 万级产业工程量压住，controller 数天不涨。
+    const deferIndustry = this._deferIndustry(room, bp);
+    if (!deferIndustry) {
+      if (bp.terminal) this.ensureSingle(room, spawn.pos, 'terminal', 3);
+      if (bp.extractor) this.planExtractor(room);
+      if (bp.lab) this.ensureCount(room, spawn.pos, 'lab', bp.lab, 7, 14);
+    }
 
     // ---- 9. factory（RCL7+，单点）----
     if (bp.factory) this.ensureSingle(room, spawn.pos, 'factory', 4);
@@ -106,6 +108,22 @@ module.exports = {
     if (afterCompact < target && fallbackRange && fallbackRange > maxRange) {
       this.placeAround(room, center, type, target - afterCompact, fallbackRange);
     }
+  },
+
+  _deferIndustry(room, bp) {
+    const strategy = Memory.strategy || {};
+    if (strategy.rapidGrowth === false || room.controller.level < 6) return false;
+    const reserve = strategy.industryReserve || 30000;
+    const energy = room.storage ? (room.storage.store[RESOURCE_ENERGY] || 0) : 0;
+    const core = [
+      ['extension', bp.extension || 0], ['tower', bp.tower || 0],
+      ['storage', bp.storage || 0], ['link', bp.link || 0],
+    ];
+    for (const pair of core) {
+      const type = TYPE[pair[0]];
+      if (type && this.countStructAndSites(room, type) < pair[1]) return true;
+    }
+    return energy < reserve;
   },
 
   /** 单点建筑：只建 1 个（已有就跳过）*/

@@ -39,6 +39,10 @@ try { econMarket = require('econ.market'); } catch (e) { econMarket = null; }
 // —— 多房联动层(2026-07-02)：跨房防御互助 + 能量支援（全局跑一次，只在真需要时动作）——
 let colonyLink;
 try { colonyLink = require('colony.link'); } catch (e) { colonyLink = null; }
+// —— 帝国扩张层：安全外矿 + 自动侦察/占领/首 Spawn 引导 ——
+let remoteMining, expansion;
+try { remoteMining = require('remote.mining'); } catch (e) { remoteMining = null; }
+try { expansion = require('expansion'); } catch (e) { expansion = null; }
 
 // —— Memory 自净：清理调试残留的 __xxx 顶层临时键 ——
 // 控制台调试/autopilot 会往 Memory 写一次性 __probe/__diag/__autopilot 等 scratch 键，
@@ -105,8 +109,8 @@ module.exports.loop = function () {
     // 3. 市场：谁干（写入 creep.memory.taskId/taskType/taskTarget）
     const assignment = market.assign(myCreeps, tasks, weights);
     // 4. 执行：每个 creep 干自己中标的活
-    // guard/share 由 colony.link 在全局层驱动，避免同 tick 在 per-room 和全局层执行两次。
-    for (const creep of allRoomCreeps.filter((c) => !(c.memory && (c.memory.guard || c.memory.share)))) {
+    // 所有专属跨房 creep 由各自全局层驱动，避免同 tick 重复执行两次。
+    for (const creep of allRoomCreeps.filter((c) => !(c.memory && (c.memory.guard || c.memory.share || c.memory.remote || c.memory.expand)))) {
       executor.run(creep);
     }
     // 5. 缺口分析
@@ -135,6 +139,10 @@ module.exports.loop = function () {
   // ⭐ 多房联动层(2026-07-02)：全局跑一次（在 per-room 循环外）。跨房防御互助 + 能量支援。
   // 只在真实需要时动作（受援房告急 + 捐助房富余），平时零副作用。单房时自动空转。
   if (colonyLink) { try { colonyLink.run(); } catch (e) { console.log('colonyLink err ' + e); } }
+  // 外矿与殖民 creep 位于非自有房，必须在 per-room 循环外全局驱动。
+  // expansion 同时负责低成本 Scout 情报；remote 只会在连续安全观测+经济/CPU门槛满足后逐线恢复。
+  if (expansion) { try { expansion.run(); } catch (e) { console.log('expansion err ' + e); } }
+  if (remoteMining) { try { remoteMining.run(); } catch (e) { console.log('remote err ' + e); } }
 
   // ===== CPU 实测（写入 Memory 供外部读回）=====
   if (typeof Game !== 'undefined' && Game.cpu && Game.cpu.getUsed) {

@@ -30,6 +30,11 @@ const DEFAULT_ROUTES = [
 const MIN_HOME_RCL = 2;          // RCL 至少 2（能造像样的 body）
 const MIN_HOME_CREEPS = 6;       // 本房自己人口够了才外扩
 const REPLAN_INTERVAL = 25;      // 每 25 tick 规划一次（够人就不再生产）
+const AUTO_SAFE_SCANS = 3;
+const AUTO_CPU_MAX = 12;
+const AUTO_BUCKET_MIN = 8000;
+const AUTO_STORAGE_FLOOR = 12000;
+const DANGER_COOLDOWN = 1000;
 
 module.exports = {
   /**
@@ -41,7 +46,10 @@ module.exports = {
     //   原因：单 spawn 的 RCL4 房处于 rcl_push 时，外矿会与本房争 spawn 时间、
     //   并把 creep 送进未侦察的邻房。未经线上验证前不自动生效。
     //   启用：Memory.remote.enabled = true（侦察确认 target 房无主无塔、本房能量富余后）。
-    if (!Memory.remote || !Memory.remote.enabled) return;
+    Memory.remote = Memory.remote || {};
+    if (Memory.remote.auto === undefined) Memory.remote.auto = true;
+    if (Memory.remote.auto && Game.time % REPLAN_INTERVAL === 0) this._autoRecover();
+    if (!Memory.remote.enabled) return;
     const routes = (Memory.remote && Memory.remote.routes) || DEFAULT_ROUTES;
     if (!Memory.remote.routes) Memory.remote.routes = routes;
 
@@ -74,7 +82,34 @@ module.exports = {
     }
   },
 
+  /** CPU/储备恢复且 Scout 连续确认安全后逐线恢复。每次最多启用一条，先 1 Miner+1 Hauler 试运行。 */
+  _autoRecover() {
+    const cpu = Memory.brain && Memory.brain.cpu;
+    if (cpu && ((cpu.ema || 0) > AUTO_CPU_MAX || (cpu.bucket || 0) < AUTO_BUCKET_MIN)) return;
+    const routes = Memory.remote.routes || DEFAULT_ROUTES;
+    let anyLive = false;
+    for (const r of routes) if (!r.disabled && !r._retired && r.autoActive) anyLive = true;
+    for (const route of routes) {
+      if (route._retired || route.manualDisabled) continue;
+      const home = Game.rooms[route.home];
+      const intel = Memory.intel && Memory.intel.rooms && Memory.intel.rooms[route.target];
+      if (!home || !home.controller || !home.controller.my || home.controller.level < 5) continue;
+      const stored = home.storage ? (home.storage.store[RESOURCE_ENERGY] || 0) : 0;
+      if (stored < AUTO_STORAGE_FLOOR || home.find(FIND_MY_CREEPS).length < MIN_HOME_CREEPS) continue;
+      if (!intel || Game.time - intel.lastSeen > 500 || intel.owner || intel.reservation || intel.hostileTower || intel.invaderCore || intel.danger || (intel.safeScans || 0) < AUTO_SAFE_SCANS) continue;
+      if (route.cooldownUntil && route.cooldownUntil > Game.time) continue;
+      if (!route.autoActive && anyLive) continue; // 一次只恢复一条，先看真实收益/风险
+      route.disabled = false;
+      route.autoActive = true;
+      route.maxHarvest = Math.max(1, Math.min(route.maxHarvest || 1, 1));
+      route.maxHaul = Math.max(1, Math.min(route.maxHaul || 1, 1));
+      Memory.remote.enabled = true;
+      anyLive = true;
+    }
+  },
+
   _runRoute(route) {
+    if (route.disabled || route.manualDisabled) return;
     const home = Game.rooms[route.home];
     if (!home || !home.controller || !home.controller.my) return; // home 不在视野/不是我的
 
@@ -105,11 +140,19 @@ module.exports = {
         filter: (h) => h.getActiveBodyparts && (h.getActiveBodyparts(ATTACK) + h.getActiveBodyparts(RANGED_ATTACK)) > 0,
       });
       danger = threats.length > 0;
+      const hostileInfra = target.find(FIND_HOSTILE_STRUCTURES, {
+        filter: (s) => s.structureType === STRUCTURE_TOWER || s.structureType === STRUCTURE_INVADER_CORE,
+      });
+      if (hostileInfra.length) danger = true;
     }
+    const intel = Memory.intel && Memory.intel.rooms && Memory.intel.rooms[route.target];
+    if (intel && (intel.hostileTower || intel.invaderCore || intel.danger)) danger = true;
     Memory.remote[route.target + ':danger'] = danger;
     if (danger) {
       // 撤退：标记所有本队 creep 回家避难（executor 看到 retreat 标记就往 home 撤）
       for (const c of mine) c.memory.retreat = true;
+      route.autoActive = false;
+      route.cooldownUntil = Game.time + DANGER_COOLDOWN;
       return; // 危险期不再孵化
     }
     for (const c of mine) delete c.memory.retreat;
@@ -155,6 +198,15 @@ module.exports = {
           memory: { remote: true, rHome: route.home, rTarget: route.target, taskType: 'rhaul', born: Game.time },
         });
       }
+    }
+
+    // 试运行自适应：target container/掉落长期积压说明运力不足，逐步加 Hauler；无积压不盲目扩军。
+    if (route.autoActive && target && Game.time % 100 === 0) {
+      let backlog = 0;
+      for (const d of target.find(FIND_DROPPED_RESOURCES, { filter: (r) => r.resourceType === RESOURCE_ENERGY })) backlog += d.amount || 0;
+      for (const s of target.find(FIND_STRUCTURES, { filter: (s) => s.structureType === STRUCTURE_CONTAINER })) backlog += s.store[RESOURCE_ENERGY] || 0;
+      if (backlog > 1500) route.maxHaul = Math.min(4, (route.maxHaul || 1) + 1);
+      route.lastBacklog = backlog;
     }
   },
 

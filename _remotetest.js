@@ -1,10 +1,11 @@
 'use strict';
 /* _remotetest.js — remote.mining 安全门控 + executor 路由回归 */
-global.FIND_MY_CREEPS=3; global.FIND_HOSTILE_CREEPS=2; global.FIND_SOURCES=5;
+global.FIND_MY_CREEPS=3; global.FIND_HOSTILE_CREEPS=2; global.FIND_HOSTILE_STRUCTURES=12; global.FIND_SOURCES=5;
 global.FIND_MY_SPAWNS=6; global.FIND_DROPPED_RESOURCES=7; global.FIND_STRUCTURES=4; global.FIND_TOMBSTONES=8;
 global.ATTACK='attack'; global.RANGED_ATTACK='ranged_attack'; global.RESOURCE_ENERGY='energy';
 global.WORK='work'; global.CARRY='carry'; global.MOVE='move';
 global.STRUCTURE_CONTAINER='container'; global.STRUCTURE_STORAGE='storage'; global.STRUCTURE_CONTROLLER='controller';
+global.STRUCTURE_TOWER='tower'; global.STRUCTURE_INVADER_CORE='invaderCore';
 global._ = { filter:(obj,fn)=>Object.keys(obj).map(k=>obj[k]).filter(fn) };
 
 let pass=0, fail=0;
@@ -27,6 +28,17 @@ const RM = require('./remote.mining.js');
   let ok=true; try{ RM.run(); }catch(e){ ok=false; console.log('   err',e.message);}
   check('默认未启用→不报错', ok);
   check('默认未启用→0孵化', spawned===0);
+}
+
+// 5. target 有敌塔，即使没有敌 creep 也必须撤退（防止自动恢复后送人头）
+{
+  resetGame(); Game.time=100; let spawned=0;
+  const rc={memory:{remote:true,rHome:'E9N54',rTarget:'E8N54',taskType:'rharvest'}}; Game.creeps={rm1:rc};
+  Memory.remote={enabled:true,routes:[{home:'E9N54',target:'E8N54',maxHarvest:2,maxHaul:3}]};
+  Game.rooms.E9N54={controller:{my:true,level:5},find:(t)=>t===FIND_MY_CREEPS?new Array(10).fill({memory:{}}):t===FIND_MY_SPAWNS?[{spawning:false,spawnCreep:()=>{spawned++;return 0;}}]:[],energyCapacityAvailable:1300,energyAvailable:1300};
+  Game.rooms.E8N54={find:(t,o)=>{if(t===FIND_HOSTILE_CREEPS)return[];if(t===FIND_HOSTILE_STRUCTURES){const a=[{structureType:STRUCTURE_TOWER}];return o&&o.filter?a.filter(o.filter):a;}return[];}};
+  RM.run();
+  check('敌塔房→撤退且不孵化',rc.memory.retreat===true&&spawned===0);
 }
 
 // 2. 启用但 home 人口不足(<6) → 不孵化

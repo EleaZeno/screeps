@@ -51,6 +51,7 @@ function mkRoom() {
   let spawned = null;
   const spawn = {
     spawning: null,
+    store: { getFreeCapacity() { return 0; } },
     spawnCreep(body, name) { spawned = { body: body.slice(), name }; return 0; },
   };
   const room = {

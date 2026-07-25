@@ -2,6 +2,7 @@
 // L4 GOAP planner + L5 adaptive 专项智能测试
 global.FIND_HOSTILE_CREEPS = 1; global.FIND_MY_CONSTRUCTION_SITES = 2; global.FIND_MY_SPAWNS = 3; global.FIND_MY_CREEPS = 10;
 global.ATTACK = 'attack'; global.RANGED_ATTACK = 'ranged'; global.WORK = 'work'; global.RESOURCE_ENERGY = 'energy';
+global.STRUCTURE_SPAWN='spawn'; global.STRUCTURE_EXTENSION='extension'; global.STRUCTURE_TOWER='tower'; global.STRUCTURE_STORAGE='storage'; global.STRUCTURE_LINK='link'; global.STRUCTURE_CONTAINER='container';
 global.Memory = {}; global.Game = { time: 1000 };
 
 const path = require('path'); const Module = require('module');
@@ -14,7 +15,7 @@ let pass = 0, fail = 0;
 function ok(c, m) { if (c) { console.log('  PASS ' + m); pass++; } else { console.log('  FAIL ' + m); fail++; } }
 
 function mkRoom(o) {
-  const sites = (o.sites || []).map(s => ({ progress: s.p, progressTotal: s.t }));
+  const sites = (o.sites || []).map(s => ({ progress: s.p, progressTotal: s.t, structureType: s.type || 'road' }));
   return {
     name: o.name || 'E9N54',
     controller: { level: o.rcl || 2, progress: o.prog || 0, ticksToDowngrade: o.ttd, my: true },
@@ -50,6 +51,16 @@ ok(p.bias.upgrade > 1.5, '冲级模式强化升级');
 r = mkRoom({ creeps: 10, cur: 500, cap: 550, sites: [{ p: 2900, t: 3000 }] }); // 剩100<300
 p = planner.plan(r, Memory.brain = {});
 ok(p.goalId === 'rcl_push', `工地快完工(剩100) → 平滑转 rcl_push (实际=${p.goalId})`);
+
+// 5. 快速发展：RCL6 只有 lab/terminal 等可选产业工地时，不阻塞冲 RCL7
+Memory.strategy = { rapidGrowth: true };
+r = mkRoom({ rcl:6, creeps:10, cur:1300, cap:1300, stored:40000, sites:[{p:0,t:100000,type:'terminal'},{p:0,t:50000,type:'lab'}] });
+p = planner.plan(r, Memory.brain = {});
+ok(p.goalId === 'rcl_push', `rapidGrowth下可选产业工地不阻塞冲级 (实际=${p.goalId})`);
+// 关键塔工地仍必须先完成
+r = mkRoom({ rcl:6, creeps:10, cur:1300, cap:1300, stored:40000, sites:[{p:0,t:5000,type:'tower'}] });
+p = planner.plan(r, Memory.brain = {});
+ok(p.goalId === 'infra', `rapidGrowth下tower仍是关键基建 (实际=${p.goalId})`);
 
 console.log('\n=== L5 自适应：乏力检测（冲级卡住→疏通经济）===');
 // 模拟：冲级目标但 progress 一直不涨 → staleness 累积 → stalenessBoost 触发
